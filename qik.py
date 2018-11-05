@@ -1,15 +1,13 @@
 # !/usr/bin/python3
-import array
 import logging
-import struct
-from serial import serial
+import serial
 
-QIK_AUTODETECT_BAUD_RATE         = 0xAA
+QIK_AUTODETECT_BAUD_RATE = 0xAA
 
-QIK_GET_FIRMWARE_VERSION         = 0x81
-QIK_GET_ERROR_BYTE               = 0x82
-QIK_GET_CONFIGURATION_PARAMETER  = 0x83
-QIK_SET_CONFIGURATION_PARAMETER  = 0x84
+QIK_GET_FIRMWARE_VERSION = 0x81
+QIK_GET_ERROR_BYTE = 0x82
+QIK_GET_CONFIGURATION_PARAMETER = 0x83
+QIK_SET_CONFIGURATION_PARAMETER = 0x84
 
 # Motor Parameters
 QIK_MOTOR_M0_FORWARD = 0x88
@@ -17,22 +15,22 @@ QIK_MOTOR_M0_REVERSE = 0x8A
 QIK_MOTOR_M1_FORWARD = 0x8C
 QIK_MOTOR_M1_REVERSE = 0x8E
 
-QIK_MOTOR_M0_FORWARD_8_BIT       = 0x89
-QIK_MOTOR_M0_REVERSE_8_BIT       = 0x8B
-QIK_MOTOR_M1_FORWARD_8_BIT       = 0x8D
-QIK_MOTOR_M1_REVERSE_8_BIT       = 0x8F
+QIK_MOTOR_M0_FORWARD_8_BIT = 0x89
+QIK_MOTOR_M0_REVERSE_8_BIT = 0x8B
+QIK_MOTOR_M1_FORWARD_8_BIT = 0x8D
+QIK_MOTOR_M1_REVERSE_8_BIT = 0x8F
 
 # 2s9v1 only
-QIK_2S9V1_MOTOR_M0_COAST         = 0x86
-QIK_2S9V1_MOTOR_M1_COAST         = 0x87
+QIK_2S9V1_MOTOR_M0_COAST = 0x86
+QIK_2S9V1_MOTOR_M1_COAST = 0x87
 
 # 2s12v10 only
-QIK_2S12V10_MOTOR_M0_BRAKE       = 0x86
-QIK_2S12V10_MOTOR_M1_BRAKE       = 0x87
+QIK_2S12V10_MOTOR_M0_BRAKE = 0x86
+QIK_2S12V10_MOTOR_M1_BRAKE = 0x87
 QIK_2S12V10_GET_MOTOR_M0_CURRENT = 0x90
 QIK_2S12V10_GET_MOTOR_M1_CURRENT = 0x91
-QIK_2S12V10_GET_MOTOR_M0_SPEED   = 0x92
-QIK_2S12V10_GET_MOTOR_M1_SPEED   = 0x93
+QIK_2S12V10_GET_MOTOR_M0_SPEED = 0x92
+QIK_2S12V10_GET_MOTOR_M1_SPEED = 0x93
 
 QIK_CONFIG_DEVICE_ID = 0
 QIK_CONFIG_PWM_PARAMETER = 1
@@ -72,13 +70,14 @@ class MotorController:
         if value is not None:
             sequence.append(value)
         self.ser.write(bytearray(sequence))
-        print("=>\t", [hex(b) for b in sequence])
+        logging.debug("=>\t", [hex(b) for b in sequence])
         reply = []
         if rcv_length is not None:
             while len(reply) < rcv_length:
                 x = self.ser.read(1)
                 reply.append(x)
-            print("<=\t", [hex(ord(b)) for b in reply])
+                if len(x) > 0:
+                    logging.debug("<=\t", [hex(ord(b)) for b in reply])
         return reply
 
     def set_debug(self, on=True):
@@ -117,6 +116,11 @@ class MotorController:
             return error
 
     # Motor & Steering / Speed control
+
+    def set_speed(self, speed):
+        self.set_l_speed(speed['ls'])
+        self.set_r_speed(speed['rs'])
+
     def set_l_speed(self, speed):
         self.set_motor_speed(0, speed)
 
@@ -128,16 +132,10 @@ class MotorController:
         self.set_motor_speed(1, 0)
 
     def set_motor_speed(self, motor_id, speed):
-        speed = max(min(speed, 127.0), -127.0)  # if its in 8 bit speed mode
+        speed = max(min(speed, 127.0), -127.0)  # range limit
         direction = speed < 0  # set reverse direction bit if speed less than 0
-        bit8speed = self.params[1]  # & 1 #first bit of paramter 1 can be used to determin if its in 8 bit speed mode
-        speed_multiplyer = 1  # speed is between 0-127 for 7bit speed mode
-        if bit8speed:
-            speed_multiplyer = 255  # speed is between 0-255 for 8bit speed mode
-        speed_byte = int(abs(speed) * speed_multiplyer)  # covert floating speed to scaled byte
-
+        speed_byte = int(abs(speed))  # covert floating speed to scaled byte
         cmd = speed_byte >= 128  # bit 0 of command is used for 8th bit of speedbyte as speedbyte can only use 7 bits
-
         speed_byte &= 127  # clear the 8th bit of the speedbyte as it can only use 7 bits
 
         cmd |= direction << 1  # shift direction into bit 1
