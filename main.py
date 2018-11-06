@@ -26,8 +26,6 @@ speed = {
     'rs':0
 }
 x_axis = y_axis = 0
-
-#pad = inputDevice.ControllerInput('Sony Computer Entertainment Wireless Controller')
 class RobotStopException(Exception):
     """
     The simplest possible subclass of Exception, we'll raise this if we want to stop the robot
@@ -53,45 +51,3 @@ try:
             print('No controller found yet')
 except RobotStopException:
     mc.stop_all()
-
-
-# except RobotStopException:
-#     # This exception will be raised when the home button is pressed, at which point we should
-#     # stop the motors.
-#     stop_motors()
-#     # time"".sleep(0.1)
-    # state = 0
-    # try:
-    #     #print(a)
-    #     time.sleep(0.1)
-    #     for ev in ds4.get_events():
-    #         cmd = ev  # type: Union[InputEvent, Any]
-    #         if cmd.code != 0 and cmd.code != 6 and cmd.code != 7  and cmd.code != 8 and cmd.code != 25 and cmd.code != 26 and cmd.code != 27:
-    #             logger.debug('X:{0} Y:{1} | L:{2} R:{3} | CODE: {4} VAL: {5}'.format(X,Y,ls,rs,cmd.code,cmd.value  ))
-    # except IOError:
-    #     pass
-    # if cmd.value == 2:  		# key pressed
-            # 	if cmd.code == 103:		# move forward
-            # 		Y += spinc
-            # 	elif cmd.code == 108:	# move back
-            # 		Y -= spinc
-            # 	if cmd.code == 105:		# move left
-            # 		X -= spinc
-            # 	elif cmd.code == 106:	# move right
-            # 		X += spinc
-            # elif cmd.value == 0:  		# key released
-            # 	if Y > 0:
-            # 		Y -= spRelease
-            # 	elif Y < 0:
-            # 		Y += spRelease
-            # 	if X > 0:
-            # 		X -= spRelease
-            # 	elif X < 0:
-            # 		X += spRelease
-            # sp = joystickToDiff(X, Y, -127, 127, -127, 127)
-            # ls = sp[0]
-            # rs = sp[1]
-            # motorControl.set_motor_speed(0, ls)
-            # motorControl.set_motor_speed(1, rs)
-            # time.sleep(0.1)
-
