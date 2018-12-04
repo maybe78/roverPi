@@ -1,5 +1,7 @@
 # !/usr/bin/python3
 import logging
+from typing import List, Any, Union
+
 import serial
 
 QIK_AUTODETECT_BAUD_RATE = 0xAA
@@ -46,24 +48,26 @@ QIK_CONFIG_MOTOR_M0_CURRENT_LIMIT_RESPONSE = 10
 QIK_CONFIG_MOTOR_M1_CURRENT_LIMIT_RESPONSE = 11
 
 m_logger = logging.getLogger('rover.qik')
-#logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s] %(threadName)s %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s] %(threadName)s %(message)s", datefmt="%H:%M:%S")
 
 class MotorController:
     def __init__(self):
-        self.ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+        """
+
+        :rtype: object
+        """
+        self.ser = serial.Serial('/dev/ttyUSB0', 38400, timeout=0.01)
         self.id = 0x0A
         self.pololu = True
         self.ser.flushOutput()
         self.ser.write(0xAA)
         self.params = self.get_all_config_params()
-        # motorControl.getError()
         print(self.get_firmware_version())
+        print(self.get_all_config_params())
 
     def send_message(self, device_id, cmd, value=None, rcv_length=None):
         self.ser.flushInput()
-        sequence = []
-        sequence.append(0xAA)
-        sequence.append(device_id)
+        sequence = [0xAA, device_id]  # type: List[Union[int, Any]]
         if self.pololu:
             cmd = cmd ^ 0x80
         sequence.append(cmd)
@@ -104,7 +108,7 @@ class MotorController:
         for i in range(12):
             params[i] = (self.get_config_param(i))
             if params[i] is not None:
-                logging.debug("Parameter {0} = {1} ".format(i, (params[i])))
+                print("Parameter {0} = {1} ".format(i, (params[i])))
         return params
 
     def set_config_param(self, param_number, value):
@@ -117,15 +121,10 @@ class MotorController:
 
     # Motor & Steering / Speed control
 
-    def set_speed(self, speed):
-        self.set_l_speed(speed['ls'])
-        self.set_r_speed(speed['rs'])
-
-    def set_l_speed(self, speed):
-        self.set_motor_speed(0, speed)
-
-    def set_r_speed(self, speed):
-        self.set_motor_speed(1, speed)
+    def set_speed(self, left, right):
+        self.set_motor_speed(0, left)
+        self.set_motor_speed(1, right)
+        print("{0}\t|\t{1}".format(left,right))
 
     def stop_all(self):
         self.set_motor_speed(0, 0)

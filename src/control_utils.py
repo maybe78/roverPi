@@ -1,12 +1,11 @@
 import math
 
-min_j = -1
-max_j = 1
-min_sp = -127
 max_sp = 127
 
-
 class Steering:
+    def __init__(self):
+        pass
+
     @staticmethod
     def joystick_to_diff_control(x, y):
         left_speed = right_speed = 0
@@ -15,8 +14,8 @@ class Steering:
             rad = math.acos(math.fabs(x) / z)
             angle = rad * 180 / math.pi
             # Now angle indicates the measure of turn
-            tcoeff = -1 + (angle / 90) * 2
-            turn = tcoeff * math.fabs(math.fabs(y) - math.fabs(x))
+            t_coefficient = -1 + (angle / 90) * 2
+            turn = t_coefficient * math.fabs(math.fabs(y) - math.fabs(x))
             turn = round(turn * 100, 0) / 100
             # And max of y or x is the movement
             mov = max(math.fabs(y), math.fabs(x))
@@ -32,14 +31,13 @@ class Steering:
                 raw_left = 0 - raw_left
                 raw_right = 0 - raw_right
             # keep in range
-            right_speed = Steering.ard_map(raw_right, min_j, max_j, min_sp, max_sp)
-            left_speed = Steering.ard_map(raw_left, min_j, max_j, min_sp, max_sp)
+            right_speed = raw_right
+            left_speed = raw_left
+            #right_speed = Steering.ard_map(raw_right, min_j, max_j, min_sp, max_sp)
+            #left_speed = Steering.ard_map(raw_left, min_j, max_j, min_sp, max_sp)
+            left_speed = int(max(min(raw_left, max_sp), max_sp * -1))
+            right_speed = int(max(min(raw_right, max_sp), -max_sp * -1))
         return left_speed, right_speed
-
-    @staticmethod
-    def ard_map(x, in_min, in_max, out_min, out_max):
-        return int((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
-
 
 
 
