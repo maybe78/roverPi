@@ -1,9 +1,10 @@
 from __future__ import print_function
-import evdev
 from select import select
+
+import evdev
 from evdev import InputDevice
 from evdev import ecodes
-from control_utils import Steering
+from utils import Steering
 import qik
 
 gamepad = InputDevice ('/dev/input/event2')

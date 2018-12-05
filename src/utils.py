@@ -2,6 +2,7 @@ import math
 
 max_sp = 127
 
+
 class Steering:
     def __init__(self):
         pass
@@ -31,10 +32,6 @@ class Steering:
                 raw_left = 0 - raw_left
                 raw_right = 0 - raw_right
             # keep in range
-            right_speed = raw_right
-            left_speed = raw_left
-            #right_speed = Steering.ard_map(raw_right, min_j, max_j, min_sp, max_sp)
-            #left_speed = Steering.ard_map(raw_left, min_j, max_j, min_sp, max_sp)
             left_speed = int(max(min(raw_left, max_sp), max_sp * -1))
             right_speed = int(max(min(raw_right, max_sp), -max_sp * -1))
         return left_speed, right_speed

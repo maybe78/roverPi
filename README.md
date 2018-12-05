@@ -13,7 +13,7 @@ Firstly need to setup a DualShock PS4 controller for rover control. Once paired 
 sudo pip install python-evdev pyudev
 sudo apt install joystick
 ```
-.*2. To pair a contoller you need to know its MAC, you can find it by the name "Wireless controller" in the list of bluetooth devices
+.*2. To pair a controller you need to know its MAC, you can find it by the name "Wireless controller" in the list of bluetooth devices
 ```bash
 sudo bluetoothctl << EOF
 devices
