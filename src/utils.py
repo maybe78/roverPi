@@ -3,38 +3,45 @@ import math
 max_sp = 127
 
 
-class Steering:
-    def __init__(self):
-        pass
+def joystick_to_diff_control(x, y, dead_zone):
+	x = float(x / max_sp)
+	y = float(y / max_sp)
+	# convert to polar
+	r = math.hypot(x, y)
+	t = math.atan2(y, x)
 
-    @staticmethod
-    def joystick_to_diff_control(x, y):
-        left_speed = right_speed = 0
-        if x != 0 and y != 0:
-            z = math.sqrt(x*x + y*y)
-            rad = math.acos(math.fabs(x) / z)
-            angle = rad * 180 / math.pi
-            # Now angle indicates the measure of turn
-            t_coefficient = -1 + (angle / 90) * 2
-            turn = t_coefficient * math.fabs(math.fabs(y) - math.fabs(x))
-            turn = round(turn * 100, 0) / 100
-            # And max of y or x is the movement
-            mov = max(math.fabs(y), math.fabs(x))
-            # First and third quadrant
-            if (x >= 0 and y >= 0) or (x < 0 and y < 0):
-                raw_left = mov
-                raw_right = turn
-            else:
-                raw_right = mov
-                raw_left = turn
-            # Reverse polarity
-            if y < 0:
-                raw_left = 0 - raw_left
-                raw_right = 0 - raw_right
-            # keep in range
-            left_speed = int(max(min(raw_left, max_sp), max_sp * -1))
-            right_speed = int(max(min(raw_right, max_sp), -max_sp * -1))
-        return left_speed, right_speed
+	# rotate by 45 degrees
+	t += math.pi / 4
+
+	# back to cartesian
+	left = r * math.cos(t)
+	right = r * math.sin(t)
+
+	# rescale to new coordinates
+	left = left * math.sqrt(2)
+	right = right * math.sqrt(2)
+
+	# clamp t abs(1)
+	left = int(left*127)
+	right = int(right*127)
+	left = max(-127, min(left, 127))
+	right = max(-127, min(right, 127))
+	if abs(left) < dead_zone:
+		left = 0
+	if abs(right) < dead_zone:
+		right = 0
+	return -left, right
 
 
-
+def joystick_to_ptz(x, y, dead_zone):
+	cmd = ''
+	if x < dead_zone * -1:
+		cmd = 'l'
+	elif x > dead_zone:
+		cmd = 'r'
+	# reverse updown due to dualshock analog stick value reverse
+	if y < dead_zone * -1:
+		cmd += 'u'
+	elif y > dead_zone:
+		cmd += 'd'
+	return cmd
