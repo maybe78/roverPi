@@ -1,13 +1,23 @@
 # roverPi
 6-wheel raspberypi robot written in Python
 
-### Previous version based om Arduino Mega:
+## Previous version based om Arduino Mega:
 ![photo](doc/roverph.jpg)
 
-### Installation
-
+## Installation
+### Raspberry Config
+В raspi-config:
+- Enable SSH
+- Enable Serial Port
+### Dependencies
+```
+sudo apt install python3-pip
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 Firstly need to setup a DualShock PS4 controller for rover control. Once paired it will be connected automatically.
-####  Dualshock4 pairing
+###  Dualshock4 pairing
 1. First of all install needed python3 bluetooth dependencies and debug util
 ```bash
 sudo pip install python-evdev pyudev
