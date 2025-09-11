@@ -28,7 +28,7 @@ class DualShock:
 
 		for device in devices:
 			print(device.path, device.name, device.phys)
-			if device.name == "Wireless Controller":
+			if device.name == "Wireless Controller" or "8Bitdo" in device.name:
 				self.dev = InputDevice(device.path)
 				print(self.dev)
 				print(self.dev.capabilities(verbose=True))
