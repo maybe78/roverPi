@@ -36,7 +36,7 @@ while True:
 	r = ''
 	active_keys = pad.read_events()
 	# convert right analog stick values to motor speed using differential control algorithm
-	ls, rs = utils.joystick_to_diff_control(pad.active_keys[ABS_RX], pad.active_keys[ABS_RY], dead_zone)
+	ls, rs = utils.joystick_to_diff_control(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
 	# send ptz commands for camera movement using rest api
 	#ptz_command = utils.joystick_to_ptz(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
 	motor_control.set_speed(ls, rs)

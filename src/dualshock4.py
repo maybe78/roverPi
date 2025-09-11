@@ -46,4 +46,5 @@ class DualShock:
 					if event.code == evdev.ecodes.ABS_RY or event.code == evdev.ecodes.ABS_Y:
 						value = value * -1
 					self.active_keys[event.code] = value
-			#logging.debug("R:\tX:{0}\tY:{1}".format(self.active_keys[ABS_RX], self.active_keys[ABS_RY]))
+					#logging.debug("Active Keys - R:\tX:{0}\tY:{1}".format(self.active_keys[ABS_RX], self.active_keys[ABS_RY]))
+
