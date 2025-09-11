@@ -30,7 +30,7 @@ logging.basicConfig(
 # Peripheral hardware instances
 pad = dualshock4.DualShock(dead_zone)
 motor_control = MotorController()
-cam = camera_rest_api.CloudCam(camera_ip, camera_port)
+#cam = camera_rest_api.CloudCam(camera_ip, camera_port)
 
 while True:
 	r = ''
@@ -38,9 +38,9 @@ while True:
 	# convert right analog stick values to motor speed using differential control algorithm
 	ls, rs = utils.joystick_to_diff_control(pad.active_keys[ABS_RX], pad.active_keys[ABS_RY], dead_zone)
 	# send ptz commands for camera movement using rest api
-	ptz_command = utils.joystick_to_ptz(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
+	#ptz_command = utils.joystick_to_ptz(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
 	motor_control.set_speed(ls, rs)
-	if ptz_command:
-		r = cam.send(ptz_command)
+	#if ptz_command:
+	#	r = cam.send(ptz_command)
 	sleep(timeout)
 	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls, rs, r)

@@ -22,7 +22,28 @@ make
 sudo make install
 mjpg_streamer -i "/home/<user>/mjpg-streamer/mjpg-streamer-experimental/_build/plugins/input_uvc/input_uvc.so -d /dev/video0 -r 1280x720 -f 30" -o "/home/<user>/mjpg-streamer/mjpg-streamer-experimental/_build/plugins/output_http/output_http.so -p 8080"
 ```
-Video will be available at url: `http://<IP-адрес вашего устройства>:8080/?action=stream`
+Video is available at url: `http://<IP-адрес вашего устройства>:8080/?action=stream`
+
+### Bluetooth controller
+To pair a controller you need to know its MAC, you can find it by the name "Wireless controller" in the list of bluetooth devices then pair.
+```bash
+bluetoothctl
+[bluetooth]# scan on
+[bluetooth]# pair E4:17:D8:01:0B:7E
+[bluetooth]# connect E4:17:D8:01:0B:7E
+```
+Or using the script in setup directory
+Check MAC
+```bash
+sudo bluetoothctl << EOF
+devices
+EOF
+```
+Pair 
+```bash
+sudo sh bluetooth-pair.sh <MAC>
+```
+You can test controller using `jstest` (joystick debian package required)
 ## Installation
 ### Raspberry Config
 В raspi-config:
@@ -30,25 +51,10 @@ Video will be available at url: `http://<IP-адрес вашего устрой
 - Enable Serial Port
 ### Dependencies
 ```
-sudo apt install python3-pip
+sudo apt install git python3-pip joystick
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-Firstly need to setup a DualShock PS4 controller for rover control. Once paired it will be connected automatically.
-###  Dualshock4 pairing
-1. First of all install needed python3 bluetooth dependencies and debug util
-```bash
-sudo pip install python-evdev pyudev
-sudo apt install joystick
-```
-.*2. To pair a controller you need to know its MAC, you can find it by the name "Wireless controller" in the list of bluetooth devices
-```bash
-sudo bluetoothctl << EOF
-devices
-EOF
-```
-3. Once MAC is known, just execute the following script passing an address as a param
-```bash
-sudo sh bluetooth-pair.sh
-```
+
+
