@@ -60,35 +60,51 @@ logging.basicConfig(
 class MotorController:
 
 	def __init__(self):
+		self.params = [None] * 12  # Или {}
 		self.ser =serial.Serial('/dev/ttyUSB0', 38400, timeout=0.2)
 		self.id = 0x0A
 		self.pololu = True
 		self.ser.flushOutput()
 		self.ser.write(0xAA)
 		self.debug = True
+		self.set_pwm_mode(0)  # Высокочастотный PWM 7 бит (19.7 кГц)
+		self.set_current_limit(0, 6)  # Ограничение тока для мотора 0 до 6 А
+		self.set_current_limit(1, 6)  # Ограничение тока для мотора 1 до 6 А
 
 	def set_debug(self, on=True):
 		self.debug = on
 
-	def send_message(self, device_id: int, cmd: int, value: int = None, rcv_length: int = None) -> object:
+	def send_message(self, device_id: int, cmd: int, value: Union[int, List[int]] = None, rcv_length: int = None) -> object:
 		self.ser.flushInput()
-		sequence = [0xAA, device_id]  # type: List[Union[int, Any]]
+		sequence = [0xAA, device_id]
 		if self.pololu:
 			cmd = cmd ^ 0x80
 		sequence.append(cmd)
 		if value is not None:
-			sequence.append(value)
+			if isinstance(value, list):
+				sequence.extend(value)
+			else:
+				sequence.append(value)
 		self.ser.write(bytearray(sequence))
-		#logging.debug("TX =>\t%s"," ".join(hex(n) for n in sequence))
 		reply = []
 		if rcv_length is not None:
 			while len(reply) < rcv_length:
 				x = self.ser.read(1)
 				reply.append(x)
-				# if x:
-				# 	logging.debug("RX <=\t"+ ":".join("{:02x}".format(hex(x))))
 		return reply
 
+	def set_pwm_mode(self, mode=0):
+		# mode: 0–5 (0 — 7 бит 19.7кГц, 1 — 8 бит 9.8кГц, и т.д. согласно доке)
+		self.set_config_param(1, mode)
+
+	def set_current_limit(self, motor_id, limit_amperes):
+		# limit_amperes — максимально допустимый ток (например, 6 А)
+		# Значение параметра равно limit_amperes / 0.6 / 2 (т.к. делится на 2)
+		param_number = 8 if motor_id == 0 else 9
+		value = int(limit_amperes / 0.6 / 2)
+		if value > 127:
+			value = 127
+		self.set_config_param(param_number, value)
 
 	def get_firmware_version(self):
 		version = self.send_message(self.id, 0x01, None, 1)

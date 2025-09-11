@@ -1,2 +1,2 @@
 #!/bin/bash
-echo -e 'connect $1' | bluetoothctl
+echo "connect $1" | bluetoothctl
