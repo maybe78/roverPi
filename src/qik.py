@@ -106,6 +106,28 @@ class MotorController:
 			value = 127
 		self.set_config_param(param_number, value)
 
+
+	def get_motor_current(self, motor_id):
+		if motor_id == 0:
+			cmd = QIK_2S12V10_GET_MOTOR_M0_CURRENT
+		elif motor_id == 1:
+			cmd = QIK_2S12V10_GET_MOTOR_M1_CURRENT
+		else:
+			raise ValueError("motor_id должен быть 0 или 1")
+		reply = self.send_message(self.id, cmd, None, 1)
+		if reply and reply[0]:
+			raw_value = int.from_bytes(reply[0], byteorder='big')
+			current_amps = raw_value * 0.1
+			return current_amps
+		return None
+
+
+	def print_motor_currents(self):
+		current_m0 = self.get_motor_current(0)
+		current_m1 = self.get_motor_current(1)
+		print(f"I M0: {current_m0:.2f} A, I M1: {current_m1:.2f} A")
+
+
 	def get_firmware_version(self):
 		version = self.send_message(self.id, 0x01, None, 1)
 		return version

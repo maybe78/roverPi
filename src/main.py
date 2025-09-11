@@ -43,4 +43,5 @@ while True:
 	#if ptz_command:
 	#	r = cam.send(ptz_command)
 	sleep(timeout)
+	motor_control.print_motor_currents()
 	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls/4, rs/4, r)
