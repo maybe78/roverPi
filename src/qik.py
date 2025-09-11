@@ -70,8 +70,8 @@ class MotorController:
 		self.set_pwm_mode(1)  # Высокочастотный PWM 7 бит (19.7 кГц)
 		self.set_current_limit(0, 25)  # Ограничение тока для мотора 0 до 6 А
 		self.set_current_limit(1, 25)  # Ограничение тока для мотора 1 до 6 А
-		self.set_config_param(QIK_CONFIG_MOTOR_M0_ACCELERATION , 30)  # Ускорение мотора 0 (примерно 1.2 с для полной скорости)
-		self.set_config_param(QIK_CONFIG_MOTOR_M1_ACCELERATION, 30)  # Ускорение мотора 1
+		self.set_config_param(QIK_CONFIG_MOTOR_M0_ACCELERATION , 50)  # Ускорение мотора 0 (примерно 1.2 с для полной скорости)
+		self.set_config_param(QIK_CONFIG_MOTOR_M1_ACCELERATION, 50)  # Ускорение мотора 1
 		self.set_config_param(QIK_CONFIG_MOTOR_M0_BRAKE_DURATION , 20)  # Торможение мотора 0 (0.2 с)
 		self.set_config_param(QIK_CONFIG_MOTOR_M1_BRAKE_DURATION , 20)  # Торможение мотора 1
 		self.set_config_param(QIK_CONFIG_MOTOR_M0_CURRENT_LIMIT_RESPONSE, 4)  # Токовая реакция 0
