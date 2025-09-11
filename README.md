@@ -2,7 +2,7 @@
 6-wheel raspberypi robot written in Python
 
 ## Previous version based om Arduino Mega:
-![photo](doc/roverph.jpg)
+![photo](images/roverph.jpg)
 
 ## Hardware
 ### Wifi Interface with Antenna
