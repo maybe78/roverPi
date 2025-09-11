@@ -39,8 +39,8 @@ while True:
 	ls, rs = utils.joystick_to_diff_control(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
 	# send ptz commands for camera movement using rest api
 	#ptz_command = utils.joystick_to_ptz(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
-	motor_control.set_speed(ls, rs)
+	motor_control.set_speed(ls/4, rs/4)
 	#if ptz_command:
 	#	r = cam.send(ptz_command)
 	sleep(timeout)
-	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls, rs, r)
+	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls/4, rs/4, r)

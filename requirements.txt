@@ -1,3 +1,4 @@
 pyserial
 evdev
 pyudev
+opencv-python-headless

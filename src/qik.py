@@ -68,8 +68,8 @@ class MotorController:
 		self.ser.write(0xAA)
 		self.debug = True
 		self.set_pwm_mode(0)  # Высокочастотный PWM 7 бит (19.7 кГц)
-		self.set_current_limit(0, 6)  # Ограничение тока для мотора 0 до 6 А
-		self.set_current_limit(1, 6)  # Ограничение тока для мотора 1 до 6 А
+		self.set_current_limit(0, 18)  # Ограничение тока для мотора 0 до 6 А
+		self.set_current_limit(1, 18)  # Ограничение тока для мотора 1 до 6 А
 
 	def set_debug(self, on=True):
 		self.debug = on

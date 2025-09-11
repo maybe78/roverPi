@@ -4,6 +4,13 @@
 ## Previous version based om Arduino Mega:
 ![photo](images/roverph.jpg)
 
+# QuickStart
+```bash
+sudo apt install git python3-pip joystick libgl1
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 ## Hardware
 ### Wifi Interface with Antenna
 Bus 001 Device 005: ID 0bda:8176 Realtek Semiconductor Corp. RTL8188CUS 802.11n WLAN Adapter
@@ -20,7 +27,7 @@ git clone https://github.com/jacksonliam/mjpg-streamer.git
 cd mjpg-streamer/mjpg-streamer-experimental
 make
 sudo make install
-mjpg_streamer -i "/home/<user>/mjpg-streamer/mjpg-streamer-experimental/_build/plugins/input_uvc/input_uvc.so -d /dev/video0 -r 1280x720 -f 30" -o "/home/<user>/mjpg-streamer/mjpg-streamer-experimental/_build/plugins/output_http/output_http.so -p 8080"
+mjpg_streamer -i "/home/volodya/mjpg-streamer/mjpg-streamer-experimental/_build/plugins/input_uvc/input_uvc.so -d /dev/video0 -r 1280x720 -f 30" -o "/home/volodya/mjpg-streamer/mjpg-streamer-experimental/_build/plugins/output_http/output_http.so -p 8080" &
 ```
 Video is available at url: `http://<IP-адрес вашего устройства>:8080/?action=stream`
 
@@ -31,6 +38,7 @@ bluetoothctl
 [bluetooth]# scan on
 [bluetooth]# pair E4:17:D8:01:0B:7E
 [bluetooth]# connect E4:17:D8:01:0B:7E
+[bluetooth]# trust E4:17:D8:01:0B:7E
 ```
 Or using the script in setup directory
 Check MAC
@@ -49,12 +57,6 @@ You can test controller using `jstest` (joystick debian package required)
 В raspi-config:
 - Enable SSH
 - Enable Serial Port
-### Dependencies
-```
-sudo apt install git python3-pip joystick
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
+
 
 

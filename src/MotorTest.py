@@ -12,7 +12,7 @@ class FourWheelRobotController:
         self.debug = on
 
     def drive(self, command):
-        speed = 63  # скорость (0-127)
+        speed = 20  # скорость (0-127)
         if command == 'w':
             self.mc.set_speed(speed, speed)
         elif command == 's':
