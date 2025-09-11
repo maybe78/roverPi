@@ -67,9 +67,16 @@ class MotorController:
 		self.ser.flushOutput()
 		self.ser.write(0xAA)
 		self.debug = True
-		self.set_pwm_mode(0)  # Высокочастотный PWM 7 бит (19.7 кГц)
-		self.set_current_limit(0, 18)  # Ограничение тока для мотора 0 до 6 А
-		self.set_current_limit(1, 18)  # Ограничение тока для мотора 1 до 6 А
+		self.set_pwm_mode(1)  # Высокочастотный PWM 7 бит (19.7 кГц)
+		self.set_current_limit(0, 25)  # Ограничение тока для мотора 0 до 6 А
+		self.set_current_limit(1, 25)  # Ограничение тока для мотора 1 до 6 А
+		self.set_config_param(QIK_CONFIG_MOTOR_M0_ACCELERATION , 30)  # Ускорение мотора 0 (примерно 1.2 с для полной скорости)
+		self.set_config_param(QIK_CONFIG_MOTOR_M1_ACCELERATION, 30)  # Ускорение мотора 1
+		self.set_config_param(QIK_CONFIG_MOTOR_M0_BRAKE_DURATION , 20)  # Торможение мотора 0 (0.2 с)
+		self.set_config_param(QIK_CONFIG_MOTOR_M1_BRAKE_DURATION , 20)  # Торможение мотора 1
+		self.set_config_param(QIK_CONFIG_MOTOR_M0_CURRENT_LIMIT_RESPONSE, 4)  # Токовая реакция 0
+		self.set_config_param(QIK_CONFIG_MOTOR_M1_CURRENT_LIMIT_RESPONSE, 4)  # Токовая реакция 1
+		self.current_speeds = {0: 0, 1: 0}
 
 	def set_debug(self, on=True):
 		self.debug = on
@@ -97,6 +104,7 @@ class MotorController:
 		# mode: 0–5 (0 — 7 бит 19.7кГц, 1 — 8 бит 9.8кГц, и т.д. согласно доке)
 		self.set_config_param(1, mode)
 
+
 	def set_current_limit(self, motor_id, limit_amperes):
 		# limit_amperes — максимально допустимый ток (например, 6 А)
 		# Значение параметра равно limit_amperes / 0.6 / 2 (т.к. делится на 2)
@@ -117,7 +125,7 @@ class MotorController:
 		reply = self.send_message(self.id, cmd, None, 1)
 		if reply and reply[0]:
 			raw_value = int.from_bytes(reply[0], byteorder='big')
-			current_amps = raw_value * 0.1
+			current_amps = raw_value * 0.15
 			return current_amps
 		return None
 
@@ -185,6 +193,28 @@ class MotorController:
 		if motor_id == 0:
 			logging.debug(speed_byte)
 		self.send_message(self.id, cmd, speed_byte, 1)
+
+	def set_motor_speed_smooth(self, motor_id, target_speed, step=5, delay=0.05):
+			"""
+			Плавно изменяет скорость мотора от текущей к target_speed
+			:param motor_id: 0 или 1
+			:param target_speed: -127 .. 127
+			:param step: величина изменения скорости за один шаг
+			:param delay: время задержки между шагами в секундах
+			"""
+			current_speed = self.current_speeds.get(motor_id, 0)
+
+			while current_speed != target_speed:
+				if abs(target_speed - current_speed) < step:
+					current_speed = target_speed
+				elif target_speed > current_speed:
+					current_speed += step
+				else:
+					current_speed -= step
+
+				self.set_motor_speed(motor_id, current_speed)
+				self.current_speeds[motor_id] = current_speed
+				time.sleep(delay)
 
 
 	def get_error(self):
