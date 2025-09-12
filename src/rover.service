@@ -1,0 +1,13 @@
+[Unit]
+Description=Rover main with venv 
+After=network.target
+
+[Service]
+Type=simple
+User=volodya
+WorkingDirectory=/home/volodya/roverPi/src
+ExecStart=/home/volodya/roverPi/src/start_all.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

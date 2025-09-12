@@ -16,6 +16,15 @@ In raspi-config:
 - Enable SSH
 - Enable Serial Port
 
+### Service Installation
+```bash
+chmod +x src/start_all.sh
+sudo cp ./rover.service /etc/systemd/system/rover.service
+sudo systemctl daemon-reload
+sudo systemctl enable rover.service
+sudo systemctl start rover.service
+```
+
 ## Hardware
 ### Motors And chasis
 [Wild Thumper All-Terrain Chassis](https://www.pololu.com/category/88/wild-thumper-all-terrain-chassis) with [Qik Motor Drive](doc/qik_2s12v10.pdf)
@@ -52,6 +61,8 @@ bluetoothctl
 [bluetooth]# trust E4:17:D8:01:0B:7E
 ```
 You can test controller using `jstest` (joystick debian package required)
+
+#
 
 
 
