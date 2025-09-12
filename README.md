@@ -1,8 +1,6 @@
 # roverPi
-6-wheel raspberypi robot written in Python
-
-## Previous version based om Arduino Mega:
-![photo](images/roverph.jpg)
+Raspbery Pi robot written in Python
+![photo](images/rover_1209.jpg)
 
 # QuickStart
 ```bash
@@ -11,7 +9,20 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+## Software
+### Raspberry Config
+In raspi-config:
+- Enable SSH
+- Enable Serial Port
+
 ## Hardware
+### Motors And chasis
+[Wild Thumper All-Terrain Chassis](https://www.pololu.com/category/88/wild-thumper-all-terrain-chassis) with [Qik Motor Drive](doc/qik_2s12v10.pdf)
+
+### Battery Pack
+I use 2 separate 3s 18650 LiOn battery packs for raspberry and motors, (3s5p and 3s3p relatively), balanced by [1$ BMS boards](https://youtu.be/cMEkpHBKMSE?si=hUZkEgKMPaiNRmlu)
+
 ### Wifi Interface with Antenna
 Bus 001 Device 005: ID 0bda:8176 Realtek Semiconductor Corp. RTL8188CUS 802.11n WLAN Adapter
 ```
@@ -32,7 +43,7 @@ mjpg_streamer -i "/home/volodya/mjpg-streamer/mjpg-streamer-experimental/_build/
 Video is available at url: `http://<IP-адрес вашего устройства>:8080/?action=stream`
 
 ### Bluetooth controller
-To pair a controller you need to know its MAC, you can find it by the name "Wireless controller" in the list of bluetooth devices then pair.
+You can use any controller you like, I use DualShock or 8bitDo. To pair a controller you need to know its MAC, you can find it by the name "Wireless controller" in the list of bluetooth devices then pair.
 ```bash
 bluetoothctl
 [bluetooth]# scan on
@@ -40,23 +51,9 @@ bluetoothctl
 [bluetooth]# connect E4:17:D8:01:0B:7E
 [bluetooth]# trust E4:17:D8:01:0B:7E
 ```
-Or using the script in setup directory
-Check MAC
-```bash
-sudo bluetoothctl << EOF
-devices
-EOF
-```
-Pair 
-```bash
-sudo sh bluetooth-pair.sh <MAC>
-```
 You can test controller using `jstest` (joystick debian package required)
-## Installation
-### Raspberry Config
-В raspi-config:
-- Enable SSH
-- Enable Serial Port
+
+
 
 
 

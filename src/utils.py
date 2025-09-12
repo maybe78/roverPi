@@ -1,75 +1,69 @@
+# utils.py
 import math
 
 max_sp = 127
 
+DEAD_ZONE = 10
+# Минимальная скорость, чтобы робот начал двигаться (преодоление трения)
+MIN_SPEED_THRESHOLD = 30
+# Максимальная скорость при движении прямо (ограничиваем, чтобы не был слишком быстрым)
+MAX_SPEED_STRAIGHT = 70
+# Коэффициент чувствительности поворота. Больше -> поворачивает резче.
+TURN_SENSITIVITY = 0.8
+# Экспонента для нелинейного управления (1.0 - линейно, >1.0 - плавнее у центра)
+CURVE_EXPONENT = 1.6
 
-def joystick_to_diff_control(x, y, dead_zone):
-	x = float(x / max_sp)
-	y = float(y / max_sp)
-	# convert to polar
-	r = math.hypot(x, y)
-	t = math.atan2(y, x)
-
-	# rotate by 45 degrees
-	t += math.pi / 4
-
-	# back to cartesian
-	left = r * math.cos(t)
-	right = r * math.sin(t)
-
-	# rescale to new coordinates
-	left = left * math.sqrt(2)
-	right = right * math.sqrt(2)
-
-	# clamp t abs(1)
-	left = int(left*127)
-	right = int(right*127)
-	left = max(-127, min(left, 127))
-	right = max(-127, min(right, 127))
-	if abs(left) < dead_zone:
-		left = 0
-	if abs(right) < dead_zone:
-		right = 0
-	return left, -right
-
-def map_to_motor_speed(joystick_value, dead_zone, min_motor_speed, curve_exponent=2.0):
-    """
-    Преобразует линейное значение с джойстика в нелинейную скорость мотора.
-
-    :param joystick_value: Входное значение от -127 до 127.
-    :param dead_zone: Мертвая зона джойстика (значения ниже игнорируются).
-    :param min_motor_speed: Минимальная скорость, с которой мотор начинает уверенно вращаться.
-    :param curve_exponent: Коэффициент кривизны (e.g., 1.5 - мягче, 2.0 - квадратичная, 3.0 - кубическая).
-    :return: Нелинейное значение скорости для мотора.
-    """
-    if abs(joystick_value) < dead_zone:
+def apply_curve_and_deadzone(value, dead_zone, min_speed, max_speed, exponent):
+    """Применяет мертвую зону, кривую и масштабирует скорость."""
+    if abs(value) < dead_zone:
         return 0
 
-    abs_val = abs(joystick_value)
-    sign = 1 if joystick_value > 0 else -1
+    abs_val = abs(value)
+    sign = 1 if value > 0 else -1
 
-    # 1. Нормализуем входное значение из диапазона [dead_zone, 127] в [0, 1]
-    normalized_input = (abs_val - dead_zone) / (127.0 - dead_zone)
-    if normalized_input > 1.0: normalized_input = 1.0
+    # Нормализуем значение из [dead_zone, 127] в [0, 1]
+    normalized = (abs_val - dead_zone) / (127 - dead_zone)
+    
+    # Применяем экспоненциальную кривую для плавности
+    curved = math.pow(normalized, exponent)
 
-    # 2. Применяем степенную кривую
-    curved_input = math.pow(normalized_input, curve_exponent)
+    # Масштабируем результат в диапазон [min_speed, max_speed]
+    output_range = max_speed - min_speed
+    final_speed = min_speed + (curved * output_range)
 
-    # 3. Масштабируем результат в выходной диапазон [min_motor_speed, 127]
-    output_range = 127 - min_motor_speed
-    mapped_speed = min_motor_speed + (curved_input * output_range)
+    return int(final_speed * sign)
 
-    return int(mapped_speed * sign)
-	
-def joystick_to_ptz(x, y, dead_zone):
-	cmd = ''
-	if x < dead_zone * -1:
-		cmd = 'l'
-	elif x > dead_zone:
-		cmd = 'r'
-	# reverse updown due to dualshock analog stick value reverse
-	if y < dead_zone * -1:
-		cmd += 'u'
-	elif y > dead_zone:
-		cmd += 'd'
-	return cmd
+def joystick_to_diff_control(x, y, dead_zone):
+    """
+    Аркадное управление. 
+    Ось Y - вперед/назад. 
+    Ось X - лево/право.
+    """
+    
+    # 1. Движение вперед/назад (Throttle) управляется осью Y.
+    #    Инвертируем, т.к. стик "вверх" обычно дает отрицательное значение.
+    forward_raw = -y
+
+    # 2. Поворот (Turn) управляется осью X.
+    #    Может понадобиться инверсия, если лево/право перепутаны.
+    turn_raw = -x
+
+
+    # Применяем кривую и пороги
+    forward_speed = apply_curve_and_deadzone(forward_raw, dead_zone, MIN_SPEED_THRESHOLD, MAX_SPEED_STRAIGHT, CURVE_EXPONENT)
+    turn_speed = apply_curve_and_deadzone(turn_raw, dead_zone, MIN_SPEED_THRESHOLD, 127, CURVE_EXPONENT)
+    
+    # Применяем чувствительность поворота
+    turn_speed *= TURN_SENSITIVITY
+
+    # Смешиваем скорости
+    left_speed = forward_speed + turn_speed
+    right_speed = forward_speed - turn_speed
+
+    # Ограничиваем значения
+    left_speed = max(-127, min(left_speed, 127))
+    right_speed = max(-127, min(right_speed, 127))
+
+    # Возвращаем скорости без инверсии правого мотора
+    return int(left_speed), int(right_speed)
+    
