@@ -45,23 +45,25 @@ finally:
         qik_port.close()
 
 while True:
-	if not pad.is_connected():
-		print("Геймпад не подключен. Попытка подключения...")
-		motor_control.stop_all() # Останавливаем моторы
+	# Проверяем, подключен ли геймпад
+	if pad.is_connected():
+		active_keys = pad.read_events()
 		
-		# Пытаемся подключиться, и если неудачно, ждем и начинаем цикл заново
-		if not pad.connect():
-			sleep(2) # Пауза между попытками
-			continue
-    
-    # Рассчитываем и отправляем скорости
-	ls, rs = utils.joystick_to_diff_control(
-		active_keys[ABS_X],
-		active_keys[ABS_Y],
-		dead_zone
-	)
-	motor_control.set_speed(ls, rs)
+		ls, rs = utils.joystick_to_diff_control(
+			active_keys[ABS_X], 
+			active_keys[ABS_Y], 
+			dead_zone
+		)
+		
+		motor_control.set_speed(ls, rs)
+		
+		logger.debug(f"Speed: l: {ls}\tr: {rs}")
 
-	sleep(timeout)
+	else:
+		print("Геймпад не подключен. Попытка подключения...")
+		motor_control.stop_all()
+		pad.connect()
+
+	sleep(timeout) 
 	motor_control.print_motor_currents()
-	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls/2, rs/2, r)
+	logger.debug("Speed: l: %s\tr: %s\t", ls, rs)
