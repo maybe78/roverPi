@@ -9,6 +9,7 @@ import evdev
 import camera_rest_api
 import dualshock4
 from qik import MotorController
+from QikErrorChecker import QikErrorChecker
 from dualshock4 import DualShock
 import utils
 
@@ -32,6 +33,26 @@ pad = dualshock4.DualShock(dead_zone)
 motor_control = MotorController()
 #cam = camera_rest_api.CloudCam(camera_ip, camera_port)
 
+qik_port = None # Объявим переменную заранее
+try:
+    # 1. Создаем и открываем serial-порт вручную
+    # Важно: убедитесь, что этот порт не занят вашим MotorController в этот же момент
+    qik_port = serial.Serial(port="/dev/ttyUSB0", baudrate=38400, timeout=0.5)
+    
+    # 2. Создаем экземпляр чекера, передавая ему ГОТОВЫЙ объект порта
+    qc = QikErrorChecker(serial_port=qik_port, model="2s12v10")
+    
+    # 3. Вызываем метод напрямую, без 'with'
+    qc.check_and_print()
+except serial.SerialException as se:
+    logger.error(f"Ошибка serial-порта при проверке Qik: {se}")
+except Exception as e:
+    logger.error(f"Не удалось проверить ошибки Qik: {e}")
+finally:
+    # 4. Обязательно закрываем порт после использования
+    if qik_port and qik_port.is_open:
+        qik_port.close()
+
 while True:
 	r = ''
 	active_keys = pad.read_events()
@@ -39,9 +60,9 @@ while True:
 	ls, rs = utils.joystick_to_diff_control(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
 	# send ptz commands for camera movement using rest api
 	#ptz_command = utils.joystick_to_ptz(pad.active_keys[ABS_X], pad.active_keys[ABS_Y], dead_zone)
-	motor_control.set_speed(ls/4, rs/4)
+	motor_control.set_speed(ls/2, rs/2)
 	#if ptz_command:
 	#	r = cam.send(ptz_command)
 	sleep(timeout)
 	motor_control.print_motor_currents()
-	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls/4, rs/4, r)
+	logger.debug("Speed: l: %s\tr: %s\t ptz: %s", ls/2, rs/2, r)

@@ -68,10 +68,10 @@ class MotorController:
 		self.ser.write(0xAA)
 		self.debug = True
 		self.set_pwm_mode(1)  # Высокочастотный PWM 7 бит (19.7 кГц)
-		self.set_current_limit(0, 25)  # Ограничение тока для мотора 0 до 6 А
-		self.set_current_limit(1, 25)  # Ограничение тока для мотора 1 до 6 А
-		self.set_config_param(QIK_CONFIG_MOTOR_M0_ACCELERATION , 50)  # Ускорение мотора 0 (примерно 1.2 с для полной скорости)
-		self.set_config_param(QIK_CONFIG_MOTOR_M1_ACCELERATION, 50)  # Ускорение мотора 1
+#		self.set_current_limit(0, 28)  # Ограничение тока для мотора 0 до 6 А
+#		self.set_current_limit(1, 28)  # Ограничение тока для мотора 1 до 6 А
+		self.set_config_param(QIK_CONFIG_MOTOR_M0_ACCELERATION , 30)  # Ускорение мотора 0 (примерно 1.2 с для полной скорости)
+		self.set_config_param(QIK_CONFIG_MOTOR_M1_ACCELERATION, 30)  # Ускорение мотора 1
 		self.set_config_param(QIK_CONFIG_MOTOR_M0_BRAKE_DURATION , 20)  # Торможение мотора 0 (0.2 с)
 		self.set_config_param(QIK_CONFIG_MOTOR_M1_BRAKE_DURATION , 20)  # Торможение мотора 1
 		self.set_config_param(QIK_CONFIG_MOTOR_M0_CURRENT_LIMIT_RESPONSE, 4)  # Токовая реакция 0
@@ -133,7 +133,11 @@ class MotorController:
 	def print_motor_currents(self):
 		current_m0 = self.get_motor_current(0)
 		current_m1 = self.get_motor_current(1)
-		print(f"I M0: {current_m0:.2f} A, I M1: {current_m1:.2f} A")
+		if current_m0 is None or current_m1 is None:
+			print("Не удалось прочитать ток с моторов (контроллер не отвечает).")
+		else:
+			# Эта строка теперь выполнится, только если есть данные
+			print(f"I M0: {current_m0:.2f} A, I M1: {current_m1:.2f} A")
 
 
 	def get_firmware_version(self):

@@ -30,7 +30,7 @@ def joystick_to_diff_control(x, y, dead_zone):
 		left = 0
 	if abs(right) < dead_zone:
 		right = 0
-	return -left, right
+	return left, -right
 
 def map_to_motor_speed(joystick_value, dead_zone, min_motor_speed, curve_exponent=2.0):
     """
