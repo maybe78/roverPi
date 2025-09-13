@@ -19,6 +19,7 @@ from webrtc_handler import WebRTCHandler
 
 dead_zone = 10
 timeout = 0.1
+shutdown_requested = False
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -27,6 +28,13 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger('rover')
+
+try:
+    import cv2
+    logger.info(f"OpenCV version: {cv2.__version__}")
+except ImportError as e:
+    logger.error(f"OpenCV import error: {e}")
+    # Можно продолжить без OpenCV, используя только numpy
 
 # Инициализация компонентов
 pad = dualshock4.DualShock(dead_zone)
@@ -119,19 +127,6 @@ def offer():
         logger.error(f"Error handling WebRTC offer: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-# Также обновите функцию cleanup:
-def cleanup():
-    """Функция очистки ресурсов"""
-    logger.info("Выполняется очистка ресурсов...")
-    
-    # Останавливаем WebRTC (теперь синхронно)
-    webrtc_handler.shutdown()
-    
-    # Останавливаем моторы
-    motor_control.stop_all()
-    
-    logger.info("Очистка ресурсов завершена")
-
 @socketio.on('connect')
 def handle_connect():
     """Обработчик подключения нового клиента к WebSocket."""
@@ -188,22 +183,30 @@ def motor_control_loop():
         motor_control.stop_all()
 
 def cleanup():
-    """Функция очистки ресурсов"""
+    """Функция очистки ресурсов - БЕЗОПАСНАЯ ВЕРСИЯ"""
+    global shutdown_requested
     logger.info("Выполняется очистка ресурсов...")
     
+    shutdown_requested = True
+    
     # Останавливаем WebRTC
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(webrtc_handler.shutdown())
-    finally:
-        loop.close()
+        webrtc_handler.shutdown()  # Это синхронный метод!
+    except Exception as e:
+        logger.error(f"Ошибка при остановке WebRTC: {e}")
     
     # Останавливаем моторы
-    motor_control.stop_all()
+    try:
+        motor_control.stop_all()
+    except Exception as e:
+        logger.error(f"Ошибка при остановке моторов: {e}")
+    
+    # Даем время на очистку
+    import time
+    time.sleep(1)
     
     logger.info("Очистка ресурсов завершена")
-
+    
 if __name__ == '__main__':
     try:
         # Создаем и запускаем поток для управления моторами

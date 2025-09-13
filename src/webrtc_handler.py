@@ -1,11 +1,10 @@
 import asyncio
 import logging
-import cv2
 import threading
 from aiortc import RTCPeerConnection, MediaStreamTrack, RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer
 from av import VideoFrame
-import json
+import numpy as np  # Используем numpy вместо cv2 для создания массивов
 
 logger = logging.getLogger('webrtc')
 
@@ -17,13 +16,16 @@ class VideoTransformTrack(MediaStreamTrack):
 
     def __init__(self):
         super().__init__()
+        self.player = None
+        self.track = None
+        self._stopped = False
+        
         # Создаем MediaPlayer для /dev/video0
         try:
-            # Пробуем разные варианты настроек камеры
             camera_options = {
                 'video_size': '640x480',
-                'framerate': '15',  # Уменьшаем framerate для стабильности
-                'pixel_format': 'yuyv422'  # Добавляем формат пикселей
+                'framerate': '15',
+                'pixel_format': 'yuyv422'
             }
             
             self.player = MediaPlayer('/dev/video0', format='v4l2', options=camera_options)
@@ -37,7 +39,6 @@ class VideoTransformTrack(MediaStreamTrack):
         except Exception as e:
             logger.error(f"Failed to initialize camera: {e}")
             try:
-                # Fallback: пробуем без дополнительных опций
                 self.player = MediaPlayer('/dev/video0', format='v4l2')
                 if self.player.video:
                     self.track = self.player.video
@@ -55,15 +56,21 @@ class VideoTransformTrack(MediaStreamTrack):
         """
         Получает кадр с камеры и возвращает его
         """
+        if self._stopped or not self.track:
+            # Возвращаем черный кадр если остановлен
+            img = np.zeros((480, 640, 3), dtype=np.uint8)
+            frame = VideoFrame.from_ndarray(img, format="bgr24")
+            return frame
+            
         try:
             frame = await self.track.recv()
             
             # Конвертируем в numpy array для обработки
             img = frame.to_ndarray(format="bgr24")
             
-            # Добавляем метку времени для отладки
-            timestamp = f'RoverPi - {asyncio.get_event_loop().time():.1f}'
-            img = cv2.putText(img, timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # Простая обработка без OpenCV
+            # Добавляем зеленый прямоугольник в углу как индикатор
+            img[10:40, 10:150] = [0, 255, 0]  # Зеленый прямоугольник
             
             # Создаем новый VideoFrame с обработанным изображением
             new_frame = VideoFrame.from_ndarray(img, format="bgr24")
@@ -73,34 +80,44 @@ class VideoTransformTrack(MediaStreamTrack):
             return new_frame
             
         except Exception as e:
-            logger.error(f"Error in recv: {e}")
-            # В случае ошибки возвращаем черный кадр с текстом ошибки
-            img = cv2.zeros((480, 640, 3), dtype=cv2.uint8)
-            cv2.putText(img, f'Camera Error: {str(e)[:50]}', (10, 240), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            if not self._stopped:
+                logger.error(f"Error in recv: {e}")
+            
+            # В случае ошибки возвращаем черный кадр
+            img = np.zeros((480, 640, 3), dtype=np.uint8)
+            # Красный прямоугольник для обозначения ошибки
+            img[240:280, 320:420] = [0, 0, 255]
             frame = VideoFrame.from_ndarray(img, format="bgr24")
             return frame
 
     def stop(self):
-        """Останавливает проигрыватель"""
-        if hasattr(self, 'player') and self.player:
-            try:
-                self.player.stop()
-            except Exception as e:
-                logger.error(f"Error stopping player: {e}")
+        """Останавливает проигрыватель - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        self._stopped = True
+        try:
+            # Останавливаем треки правильно
+            if self.track and hasattr(self.track, 'stop'):
+                self.track.stop()
+            
+            # MediaPlayer освобождается автоматически при удалении ссылки
+            self.player = None
+            self.track = None
+            logger.info("Video player resources released")
+        except Exception as e:
+            logger.error(f"Error stopping player: {e}")
 
 
 class WebRTCHandler:
     """
-    Класс для обработки WebRTC соединений с правильным управлением event loop
+    Класс для обработки WebRTC соединений - ИСПРАВЛЕННАЯ ВЕРСИЯ
     """
     
     def __init__(self):
-        self.pcs = set()  # Множество активных соединений
+        self.pcs = set()
         self.video_track = None
         self.loop = None
         self.loop_thread = None
         self.is_running = False
+        self._shutdown_in_progress = False
         
     def start_loop(self):
         """Запускает event loop в отдельном потоке"""
@@ -136,6 +153,9 @@ class WebRTCHandler:
         """
         Обрабатывает SDP offer от клиента и возвращает answer
         """
+        if self._shutdown_in_progress:
+            raise RuntimeError("WebRTC handler is shutting down")
+            
         if not self.is_running:
             self.start_loop()
             
@@ -144,17 +164,24 @@ class WebRTCHandler:
         )
         
         try:
-            return future.result(timeout=10.0)  # 10 секунд таймаут
+            return future.result(timeout=10.0)
         except Exception as e:
             logger.error(f"Error in create_offer: {e}")
             raise
         
     async def _async_create_offer(self, sdp_offer):
         """
-        Асинхронная версия создания offer - ИСПРАВЛЕННАЯ
+        Асинхронная версия создания offer - БЕЗОПАСНАЯ ВЕРСИЯ
         """
+        if self._shutdown_in_progress:
+            raise RuntimeError("Shutdown in progress")
+            
         try:
-            # Создаем новое peer connection
+            # Ограничиваем количество одновременных соединений
+            if len(self.pcs) > 5:
+                logger.warning("Too many peer connections, rejecting new connection")
+                raise RuntimeError("Too many connections")
+                
             pc = RTCPeerConnection()
             self.pcs.add(pc)
             
@@ -163,52 +190,29 @@ class WebRTCHandler:
             async def on_connectionstatechange():
                 logger.info(f"Connection state is {pc.connectionState}")
                 if pc.connectionState in ["closed", "failed"]:
-                    self.pcs.discard(pc)
-                    if hasattr(pc, '_video_track_instance'):
-                        try:
-                            pc._video_track_instance.stop()
-                        except:
-                            pass
+                    await self._cleanup_pc(pc)
                     
-            # Добавляем обработчик для получения треков от клиента
             @pc.on("track")
             def on_track(track):
                 logger.info(f"Track received: {track.kind}")
             
-            # ИСПРАВЛЕНИЕ: Добавляем видео трек ДО установки remote description
+            # Добавляем видео трек
             video_track = VideoTransformTrack()
-            pc._video_track_instance = video_track  # Сохраняем ссылку для очистки
+            pc._video_track_instance = video_track
             pc.addTrack(video_track)
-            logger.info("Video track added BEFORE setRemoteDescription")
+            logger.info("Video track added")
             
-            # Теперь устанавливаем remote description
+            # Устанавливаем remote description
             await pc.setRemoteDescription(RTCSessionDescription(
                 sdp=sdp_offer["sdp"], 
                 type=sdp_offer["type"]
             ))
-            
-            # Проверяем трансиверы после установки remote description
-            transceivers = pc.getTransceivers()
-            logger.info(f"Found {len(transceivers)} transceivers after setRemoteDescription")
-            
-            for i, transceiver in enumerate(transceivers):
-                logger.info(f"Transceiver {i}: kind={transceiver.kind}, direction={transceiver.direction}")
-                
-                # Убеждаемся что направление правильное для отправки видео
-                if transceiver.kind == "video":
-                    # Должно быть sendonly или sendrecv для отправки видео с сервера
-                    logger.info(f"Video transceiver direction: {transceiver.direction}")
-                    # Если направление recvonly, устанавливаем sendrecv
-                    if hasattr(transceiver, 'direction') and transceiver.direction == 'recvonly':
-                        transceiver.direction = 'sendrecv'
-                        logger.info("Changed video transceiver direction to sendrecv")
             
             # Создаем answer
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
             
             logger.info("WebRTC offer processed successfully")
-            logger.info(f"Answer SDP preview: {answer.sdp[:500]}...")
             
             return {
                 "sdp": pc.localDescription.sdp,
@@ -217,45 +221,80 @@ class WebRTCHandler:
             
         except Exception as e:
             logger.error(f"Error in _async_create_offer: {e}", exc_info=True)
+            # Очищаем PC при ошибке
+            if 'pc' in locals():
+                await self._cleanup_pc(pc)
             raise
     
+    async def _cleanup_pc(self, pc):
+        """Безопасная очистка peer connection"""
+        try:
+            self.pcs.discard(pc)
+            
+            if hasattr(pc, '_video_track_instance'):
+                pc._video_track_instance.stop()
+                
+            if pc.connectionState != 'closed':
+                await pc.close()
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up PC: {e}")
+    
     def shutdown(self):
-        """Закрывает все соединения"""
-        if not self.is_running:
+        """Закрывает все соединения - БЕЗОПАСНАЯ ВЕРСИЯ"""
+        if self._shutdown_in_progress or not self.is_running:
+            logger.info("Shutdown already in progress or not running")
             return
             
+        self._shutdown_in_progress = True
+        logger.info("Starting WebRTC shutdown...")
+        
         try:
             # Планируем задачу закрытия в event loop
             future = asyncio.run_coroutine_threadsafe(
                 self._async_shutdown(), self.loop
             )
-            future.result(timeout=5.0)
+            future.result(timeout=3.0)  # Сокращаем таймаут
             
-            # Останавливаем event loop
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            
-            # Ждем завершения потока
-            if self.loop_thread and self.loop_thread.is_alive():
-                self.loop_thread.join(timeout=2.0)
-                
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
         finally:
+            # Принудительно останавливаем event loop
+            if self.loop and self.is_running:
+                self.loop.call_soon_threadsafe(self.loop.stop)
+            
             self.is_running = False
             logger.info("WebRTC handler shutdown complete")
         
     async def _async_shutdown(self):
-        """Асинхронная версия shutdown"""
-        # Останавливаем все video tracks
-        for pc in list(self.pcs):
+        """Асинхронная версия shutdown - БЕЗОПАСНАЯ"""
+        logger.info(f"Shutting down {len(self.pcs)} peer connections...")
+        
+        # Создаем копию множества для безопасной итерации
+        pcs_copy = list(self.pcs)
+        self.pcs.clear()
+        
+        # Останавливаем все видео треки
+        for pc in pcs_copy:
             if hasattr(pc, '_video_track_instance'):
                 try:
                     pc._video_track_instance.stop()
-                except:
-                    pass
+                except Exception as e:
+                    logger.error(f"Error stopping video track: {e}")
                     
-        # Закрываем все peer connections
-        coros = [pc.close() for pc in self.pcs]
-        if coros:
-            await asyncio.gather(*coros, return_exceptions=True)
-        self.pcs.clear()
+        # Закрываем все peer connections с таймаутом
+        close_tasks = []
+        for pc in pcs_copy:
+            if pc.connectionState != 'closed':
+                close_tasks.append(pc.close())
+        
+        if close_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*close_tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Timeout waiting for peer connections to close")
+        
+        logger.info("All peer connections cleaned up")
