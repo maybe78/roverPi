@@ -185,13 +185,13 @@ def motor_control_loop():
 def cleanup():
     """Функция очистки ресурсов - БЕЗОПАСНАЯ ВЕРСИЯ"""
     global shutdown_requested
-    logger.info("Выполняется очистка ресурсов...")
+    logger.info("Выполняется БЕЗОПАСНАЯ очистка ресурсов...")
     
     shutdown_requested = True
     
-    # Останавливаем WebRTC
+    # Останавливаем WebRTC БЕЗОПАСНО
     try:
-        webrtc_handler.shutdown()  # Это синхронный метод!
+        webrtc_handler.shutdown()  # Теперь это безопасно
     except Exception as e:
         logger.error(f"Ошибка при остановке WebRTC: {e}")
     
@@ -201,11 +201,8 @@ def cleanup():
     except Exception as e:
         logger.error(f"Ошибка при остановке моторов: {e}")
     
-    # Даем время на очистку
-    import time
-    time.sleep(1)
-    
-    logger.info("Очистка ресурсов завершена")
+    # НЕ ждем - быстро выходим
+    logger.info("Безопасная очистка ресурсов завершена")
     
 if __name__ == '__main__':
     try:
