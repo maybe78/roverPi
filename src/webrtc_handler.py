@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import threading
-from aiortc import RTCPeerConnection, MediaStreamTrack, RTCSessionDescription
+from aiortc import RTCPeerConnection, MediaStreamTrack, RTCSessionDescription, RTCConfiguration, RTCIceServer
 from aiortc.contrib.media import MediaPlayer
 from av import VideoFrame
-import numpy as np  # Используем numpy вместо cv2 для создания массивов
+import numpy as np
+import re
 
 logger = logging.getLogger('webrtc')
 
@@ -91,24 +92,47 @@ class VideoTransformTrack(MediaStreamTrack):
             return frame
 
     def stop(self):
-        """Останавливает проигрыватель - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        """Останавливает проигрыватель"""
         self._stopped = True
         try:
-            # Останавливаем треки правильно
             if self.track and hasattr(self.track, 'stop'):
                 self.track.stop()
             
-            # MediaPlayer освобождается автоматически при удалении ссылки
             self.player = None
             self.track = None
             logger.info("Video player resources released")
         except Exception as e:
             logger.error(f"Error stopping player: {e}")
 
+def fix_safari_sdp(sdp_text):
+    """
+    Исправляет SDP для совместимости с Safari/iOS
+    """
+    lines = sdp_text.split('\r\n')
+    fixed_lines = []
+    
+    for line in lines:
+        # Исправляем направления для Safari
+        if line.startswith('a=') and ('recvonly' in line or 'sendonly' in line or 'sendrecv' in line or 'inactive' in line):
+            # Safari иногда создает некорректные направления
+            if 'recvonly' in line:
+                fixed_lines.append('a=recvonly')
+            elif 'sendonly' in line:
+                fixed_lines.append('a=sendonly')
+            elif 'sendrecv' in line:
+                fixed_lines.append('a=sendrecv')
+            elif 'inactive' in line:
+                fixed_lines.append('a=inactive')
+            else:
+                fixed_lines.append(line)
+        else:
+            fixed_lines.append(line)
+    
+    return '\r\n'.join(fixed_lines)
 
 class WebRTCHandler:
     """
-    Класс для обработки WebRTC соединений - ИСПРАВЛЕННАЯ ВЕРСИЯ
+    Класс для обработки WebRTC соединений с поддержкой iOS
     """
     
     def __init__(self):
@@ -171,7 +195,7 @@ class WebRTCHandler:
         
     async def _async_create_offer(self, sdp_offer):
         """
-        Асинхронная версия создания offer - БЕЗОПАСНАЯ ВЕРСИЯ
+        Асинхронная версия создания offer с упрощенной конфигурацией
         """
         if self._shutdown_in_progress:
             raise RuntimeError("Shutdown in progress")
@@ -182,7 +206,10 @@ class WebRTCHandler:
                 logger.warning("Too many peer connections, rejecting new connection")
                 raise RuntimeError("Too many connections")
                 
-            pc = RTCPeerConnection()
+            # ИСПРАВЛЕНИЕ: Упрощенная конфигурация без проблемных опций
+            ice_servers = [RTCIceServer(urls=['stun:stun.l.google.com:19302'])]
+            configuration = RTCConfiguration(iceServers=ice_servers)
+            pc = RTCPeerConnection(configuration=configuration)
             self.pcs.add(pc)
             
             # Добавляем обработчик для отключения
@@ -196,23 +223,56 @@ class WebRTCHandler:
             def on_track(track):
                 logger.info(f"Track received: {track.kind}")
             
-            # Добавляем видео трек
+            # Добавляем видео трек ДО установки remote description (как раньше)
             video_track = VideoTransformTrack()
             pc._video_track_instance = video_track
             pc.addTrack(video_track)
-            logger.info("Video track added")
+            logger.info("Video track added BEFORE setRemoteDescription")
             
-            # Устанавливаем remote description
-            await pc.setRemoteDescription(RTCSessionDescription(
-                sdp=sdp_offer["sdp"], 
+            # ВАЖНО: Исправляем SDP перед установкой
+            fixed_sdp = fix_safari_sdp(sdp_offer["sdp"])
+            
+            logger.info("Setting remote description...")
+            logger.debug(f"Original SDP type: {sdp_offer['type']}")
+            
+            # Устанавливаем remote description с исправленным SDP
+            remote_desc = RTCSessionDescription(
+                sdp=fixed_sdp,
                 type=sdp_offer["type"]
-            ))
+            )
+            await pc.setRemoteDescription(remote_desc)
+            
+            # Проверяем трансиверы после установки remote description
+            transceivers = pc.getTransceivers()
+            logger.info(f"Found {len(transceivers)} transceivers after setRemoteDescription")
+            
+            for i, transceiver in enumerate(transceivers):
+                logger.info(f"Transceiver {i}: kind={transceiver.kind}, direction={transceiver.direction}")
+                
+                # Убеждаемся что направление правильное для отправки видео
+                if transceiver.kind == "video":
+                    # Должно быть sendonly или sendrecv для отправки видео с сервера
+                    logger.info(f"Video transceiver direction: {transceiver.direction}")
+                    # Если направление recvonly, устанавливаем sendrecv
+                    if hasattr(transceiver, 'direction') and transceiver.direction == 'recvonly':
+                        transceiver.direction = 'sendrecv'
+                        logger.info("Changed video transceiver direction to sendrecv")
             
             # Создаем answer
+            logger.info("Creating answer...")
             answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
+            
+            # Исправляем answer SDP для iOS
+            fixed_answer_sdp = fix_safari_sdp(answer.sdp)
+            fixed_answer = RTCSessionDescription(
+                sdp=fixed_answer_sdp,
+                type=answer.type
+            )
+            
+            await pc.setLocalDescription(fixed_answer)
             
             logger.info("WebRTC offer processed successfully")
+            logger.info(f"Answer SDP preview: {answer.sdp[:500]}...")
             
             return {
                 "sdp": pc.localDescription.sdp,
@@ -241,7 +301,7 @@ class WebRTCHandler:
             logger.error(f"Error cleaning up PC: {e}")
     
     def shutdown(self):
-        """Закрывает все соединения - БЕЗОПАСНАЯ ВЕРСИЯ"""
+        """Закрывает все соединения"""
         if self._shutdown_in_progress or not self.is_running:
             logger.info("Shutdown already in progress or not running")
             return
@@ -254,7 +314,7 @@ class WebRTCHandler:
             future = asyncio.run_coroutine_threadsafe(
                 self._async_shutdown(), self.loop
             )
-            future.result(timeout=3.0)  # Сокращаем таймаут
+            future.result(timeout=3.0)
             
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -267,7 +327,7 @@ class WebRTCHandler:
             logger.info("WebRTC handler shutdown complete")
         
     async def _async_shutdown(self):
-        """Асинхронная версия shutdown - БЕЗОПАСНАЯ"""
+        """Асинхронная версия shutdown"""
         logger.info(f"Shutting down {len(self.pcs)} peer connections...")
         
         # Создаем копию множества для безопасной итерации

@@ -42,12 +42,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    function isIOSDevice() {
+        return /iPad|iPhone|iPod/.test(navigator.userAgent);
+    }
+    
     // WebRTC функции
     function createPeerConnection() {
         const config = {
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-            sdpSemantics: 'unified-plan'
+            sdpSemantics: 'unified-plan',
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require'
         };
+
 
         pc = new RTCPeerConnection(config);
 
@@ -112,7 +119,16 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus('Инициализация...', false);
 
             pc = createPeerConnection();
-
+            const offerOptions = {
+                offerToReceiveVideo: true,
+                offerToReceiveAudio: false
+            };
+            
+            if (isIOSDevice()) {
+                console.log('Detected iOS device, using special configuration');
+                // Для iOS явно добавляем трансивер
+                pc.addTransceiver('video', {direction: 'recvonly'});
+            }
             const offer = await pc.createOffer({
                 offerToReceiveVideo: true,
                 offerToReceiveAudio: false
@@ -121,11 +137,13 @@ document.addEventListener('DOMContentLoaded', () => {
             await pc.setLocalDescription(offer);
 
             console.log('Offer SDP (first 500 chars):', offer.sdp.substring(0, 500));
+            console.log('User agent:', navigator.userAgent);
 
             const response = await fetch('/offer', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'User-Agent': navigator.userAgent
                 },
                 body: JSON.stringify({
                     sdp: offer.sdp,
