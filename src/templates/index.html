@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>RoverPi Control</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+body {
+  font-family: 'Press Start 2P', cursive;
+  background-color: #0f192a;  /* Очень темный синий фон PS1 */
+  color: #bbbbbb;             /* Мягкий светло-серый текст */
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  user-select: none;
+}
+
+h1 {
+  font-size: 2.5rem;
+  color: #0055ff;  /* Яркий фирменный синий PS1 */
+  margin: 30px 0 20px;
+  text-align: center;
+  width: 100%;
+  text-shadow: 1px 1px #001f66;
+}
+
+#video-stream {
+  background-color: #333844; /* Темно-серый лаконичный фон */
+  border: 5px solid #444444; /* Жесткая серая рамка */
+  border-radius: 16px;
+  margin-top: 10px;
+  max-width: 90vw;
+  height: auto;
+  display: block;
+  box-shadow: 0 0 15px #000a1a;
+}
+
+#joystickDiv {
+  width: 200px;
+  height: 200px;
+  background-color: #222533;  /* Классический темный матовый фон */
+  border-radius: 50%;
+  border: 5px solid #0055ff;  /* Акцентный синий контур */
+  box-shadow: 0 0 12px #0055ff;
+  margin-top: 30px;
+}
+    </style>
+</head>
+<body>
+  <h1>RoverPi</h1>
+
+  <img id="video-stream" src="http://192.168.0.38:8080/?action=stream" alt="Video Stream" />
+
+  <div id="joystickDiv"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client/dist/socket.io.js"></script>
+  <script src="/static/js/joystick.js"></script>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>

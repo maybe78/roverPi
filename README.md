@@ -131,7 +131,6 @@ Re-assign the default route
 sudo ip route del default dev wlan0
 sudo ip route add default dev wlx<adapter_mac_address>
 ```
----
 
 ## Running the Robot
 
@@ -159,3 +158,12 @@ sudo systemctl enable rover.service
 *   **View live logs:** `journalctl -u rover.service -f`
 
 Once the service is running, the robot is ready for control, and the video stream is live.
+
+## Web Interface
+The RoverPi project includes a web-based remote control interface built on Flask and Socket.IO. This interface enables you to control the rover using any modern web browser on your computer or mobile device, with live video streaming and a virtual joystick.
+
+### Key Features
+- Stream live video feed from the robot’s camera.
+- Control motors using a responsive virtual joystick.
+- Real-time command updates using WebSockets.
+Open your web browser and go to: `http://<robot-ip-address>:5000`

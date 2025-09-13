@@ -1,0 +1,31 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const socket = io();
+
+    // Bind JoyStick.js к DIV, а не canvas!
+    const joy = new JoyStick('joystickDiv', {
+        internalFillColor: '#444c5c',     // Темно-серый, почти графитовый
+        internalLineWidth: 3,
+        internalStrokeColor: '#222933',   // Еще темнее для обводки внутри
+        externalLineWidth: 3,
+        externalStrokeColor: '#0055ff',   // Яркий фирменный синий PS1
+        autoReturnToCenter: true,
+        autoReturnSpeed: 15,
+        radius: 70 /* немного увеличенный радиус для удобства */
+    }, function(stickData) {
+        // stickData.x и .y — значения [-100, 100]
+        const lx = (stickData.x / 100).toFixed(2);
+        const ly = (-stickData.y / 100).toFixed(2); // Инверсия Y для совместимости
+
+        // Только при движении джойстика шлём не-нулевые значения
+        socket.emit('control', { lx, ly });
+        console.log(`Sending control: lx=${lx}, ly=${ly}`);
+    });
+
+    // Гарантия остановки — когда отпускаем (чтобы робот не уехал вслепую)
+    function stopMovement() {
+        socket.emit('control', { lx: 0.0, ly: 0.0 });
+        console.log('Force stop on touch end');
+    }
+    document.addEventListener('touchend', stopMovement);
+    document.addEventListener('mouseup', stopMovement);
+});
