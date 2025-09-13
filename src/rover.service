@@ -1,6 +1,7 @@
 [Unit]
-Description=Rover main with venv 
-After=network.target
+Description=Rover robot 
+Wants=dev-video0.device
+After=network.target dev-video0.device
 
 [Service]
 Type=simple
