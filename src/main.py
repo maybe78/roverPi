@@ -8,6 +8,8 @@ from qik import MotorController
 from QikErrorChecker import QikErrorChecker
 import utils
 
+from web_commands import WebCommands
+
 dead_zone = 10
 timeout = 0.1
 
@@ -16,11 +18,12 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)-8s %(message)s",
     datefmt="%H:%M:%S"
 )
-logger = logging.getLogger('rover')
 
+logger = logging.getLogger('rover')
 
 pad = dualshock4.DualShock(dead_zone)
 motor_control = MotorController()
+web_commands = WebCommands()
 
 qik_port = None
 try:
@@ -52,10 +55,24 @@ try:
 			logger.debug(f"Left {ls}, Right: {rs}")
 
 		else:
-			# Если геймпад отключился - останавливаем моторы и пытаемся переподключиться.
-			logger.warning("Геймпад не подключен. Остановка моторов и попытка переподключения.")
-			motor_control.stop_all()
+			# Приоритет №2: Веб-интерфейс
+			web_ls, web_rs = web_commands.get_speed()
+			if web_ls is not None and web_rs is not None:
+				logger.debug(f"Команда из веба -> Левый: {web_ls}, Правый: {web_rs}")
+				motor_control.set_speed(web_ls, web_rs)
+				# Сбрасываем команду, чтобы робот не ехал бесконечно по последней команде
+				web_commands.clear()
+			else:
+				# Если нет никаких команд - стоп
+				logger.debug("Нет активных команд. Остановка моторов.")
+				motor_control.stop_all()
+		
+		# Попытка подключения геймпада, если он не активен
+		if not pad.is_connected():
+			logger.info("Геймпад не найден, попытка переподключения...")
 			pad.connect()
+
+		sleep(timeout)
 
 		sleep(timeout)
 		motor_control.print_motor_currents()
