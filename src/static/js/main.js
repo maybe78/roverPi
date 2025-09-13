@@ -1,25 +1,22 @@
-const socket = io();
+document.addEventListener('DOMContentLoaded', () => {
+    const socket = io();
 
-const joystick = nipplejs.create({
-    zone: document.getElementById('joystick'),
-    mode: 'static',
-    position: { left: '50%', top: '50%' },
-    color: 'blue',
-    size: 150
-});
+    // Bind JoyStick.js к DIV, а не canvas!
+    const joy = new JoyStick('joystickDiv', {}, function(stickData) {
+        // stickData.x и .y — значения [-100, 100]
+        const lx = (stickData.x / 100).toFixed(2);
+        const ly = (-stickData.y / 100).toFixed(2); // Инверсия Y для совместимости
 
-joystick.on('move', (evt, data) => {
-    if (data && data.vector) {
-        // Send axis data to server
-        const lx = data.vector.x.toFixed(2);
-        const ly = -data.vector.y.toFixed(2); // invert Y
+        // Только при движении джойстика шлём не-нулевые значения
+        socket.emit('control', { lx, ly });
+        console.log(`Sending control: lx=${lx}, ly=${ly}`);
+    });
 
-        socket.emit('control', {lx, ly});
-        console.log(`Sent control: lx=${lx}, ly=${ly}`);
+    // Гарантия остановки — когда отпускаем (чтобы робот не уехал вслепую)
+    function stopMovement() {
+        socket.emit('control', { lx: 0.0, ly: 0.0 });
+        console.log('Force stop on touch end');
     }
-});
-
-joystick.on('end', () => {
-    socket.emit('control', {lx: 0, ly: 0});
-    console.log('Joystick released');
+    document.addEventListener('touchend', stopMovement);
+    document.addEventListener('mouseup', stopMovement);
 });

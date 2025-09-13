@@ -48,29 +48,30 @@ def handle_connect():
 
 @socketio.on('control')
 def handle_control(data):
-    """
-    Принимает данные от виртуального джойстика из браузера,
-    преобразует их в скорость моторов и сохраняет в общем объекте.
-    """
-    try:
-        # Координаты от nipplejs приходят в диапазоне [-1, 1]
-        lx = float(data.get('lx', 0.0))
-        ly = float(data.get('ly', 0.0))
-        
-        # Преобразуем координаты джойстика в дифференциальное управление
-        # Используем ту же утилиту, что и для физического геймпада,
-        # но сначала приводим значения к диапазону [0, 255]
-        mapped_x = int(lx * 127 + 128)
-        mapped_y = int(ly * 127 + 128)
+	"""
+	Принимает данные от веб-джойстика, масштабирует их
+	к диапазону [-127, 127] и передает в утилиту управления.
+	"""
+	try:
+		# Координаты от nipplejs приходят в диапазоне [-1.0, 1.0]
+		lx = float(data.get('lx', 0.0))
+		ly = float(data.get('ly', 0.0))
 
-        ls, rs = utils.joystick_to_diff_control(mapped_x, mapped_y, dead_zone)
+		# --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ---
+		# Масштабируем веб-координаты [-1.0, 1.0] до диапазона [-127, 127],
+		# который, судя по utils.py, ожидает ваша функция.
+		scaled_x = int(lx * 127)
+		scaled_y = int(ly * 127)
 
-        # Сохраняем команду в потокобезопасный объект
-        web_commands.set_speed(ls, rs)
-        logger.debug(f"Команда из веба принята: L={ls}, R={rs}")
+		# Теперь используем ту же самую функцию, что и для геймпада
+		ls, rs = utils.joystick_to_diff_control(scaled_x, scaled_y, dead_zone)
 
-    except (ValueError, KeyError) as e:
-        logger.error(f"Ошибка в данных от веб-клиента: {e}")
+		# Сохраняем команду в потокобезопасный объект
+		web_commands.set_speed(ls, rs)
+		logger.debug(f"Web command accepted: L={ls}, R={rs}")
+
+	except Exception as e:
+		logger.error(f"Ошибка в данных от веб-клиента: {e}", exc_info=True)
 
 # Motor Check		
 qik_port = None
@@ -94,19 +95,24 @@ def motor_control_loop():
 			# Приоритет №1: Геймпад
 			if pad.is_connected():
 				active_keys = pad.read_events()
-				ls, rs = utils.joystick_to_diff_control(
-					active_keys[ABS_X], 
-					active_keys[ABS_Y], 
-					dead_zone
-				)
+				if ABS_X in active_keys and ABS_Y in active_keys:
+					# Если есть - рассчитываем скорость
+					ls, rs = utils.joystick_to_diff_control(
+						active_keys[ABS_X],
+						active_keys[ABS_Y],
+						dead_zone
+					)
+				else:
+					pass
+				motor_control.set_speed(ls, rs)
 				motor_control.set_speed(ls, rs)
 			else:
 				# Приоритет №2: Веб-интерфейс
 				web_ls, web_rs = web_commands.get_speed()
 				if web_ls is not None and web_rs is not None:
 					motor_control.set_speed(web_ls, web_rs)
-					# Сбрасываем команду, чтобы робот не ехал бесконечно
-					web_commands.clear()
+					# # Сбрасываем команду, чтобы робот не ехал бесконечно
+					# web_commands.clear()
 				else:
 					motor_control.stop_all()
 			
