@@ -62,7 +62,15 @@ bluetoothctl
 ```
 You can test controller using `jstest` (joystick debian package required)
 
-#
+## Web Interface
+The RoverPi project includes a web-based remote control interface built on Flask and Socket.IO. This interface enables you to control the rover using any modern web browser on your computer or mobile device, with live video streaming and a virtual joystick.
+
+### Key Features
+- Stream live video feed from the robot’s camera.
+- Control motors using a responsive virtual joystick.
+- Real-time command updates using WebSockets.
+Open your web browser and go to: `http://<robot-ip-address>:5000`
+
 
 
 
