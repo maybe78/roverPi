@@ -2,3 +2,6 @@ pyserial
 evdev
 pyudev
 opencv-python-headless
+flask
+flask-socketio
+simple-websocket

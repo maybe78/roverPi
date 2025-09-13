@@ -1,7 +1,11 @@
 import logging
 from time import sleep
+from threading import Thread, Lock
 from evdev._ecodes import ABS_X, ABS_Y
 import serial
+
+from flask import Flask, render_template
+from flask_socketio import SocketIO
 
 import dualshock4
 from qik import MotorController
@@ -25,6 +29,50 @@ pad = dualshock4.DualShock(dead_zone)
 motor_control = MotorController()
 web_commands = WebCommands()
 
+# Web-server Init 
+app = Flask(__name__)
+# Устанавливаем секретный ключ для безопасных сессий
+app.config['SECRET_KEY'] = 'your_very_secret_key'
+# Создаем экземпляр SocketIO, передавая ему наше приложение
+socketio = SocketIO(app, async_mode='threading')
+
+@app.route('/')
+def index():
+    """Отдает главную HTML-страницу."""
+    return render_template('index.html')
+
+@socketio.on('connect')
+def handle_connect():
+    """Обработчик подключения нового клиента к WebSocket."""
+    logger.info("Клиент подключился к веб-интерфейсу")
+
+@socketio.on('control')
+def handle_control(data):
+    """
+    Принимает данные от виртуального джойстика из браузера,
+    преобразует их в скорость моторов и сохраняет в общем объекте.
+    """
+    try:
+        # Координаты от nipplejs приходят в диапазоне [-1, 1]
+        lx = float(data.get('lx', 0.0))
+        ly = float(data.get('ly', 0.0))
+        
+        # Преобразуем координаты джойстика в дифференциальное управление
+        # Используем ту же утилиту, что и для физического геймпада,
+        # но сначала приводим значения к диапазону [0, 255]
+        mapped_x = int(lx * 127 + 128)
+        mapped_y = int(ly * 127 + 128)
+
+        ls, rs = utils.joystick_to_diff_control(mapped_x, mapped_y, dead_zone)
+
+        # Сохраняем команду в потокобезопасный объект
+        web_commands.set_speed(ls, rs)
+        logger.debug(f"Команда из веба принята: L={ls}, R={rs}")
+
+    except (ValueError, KeyError) as e:
+        logger.error(f"Ошибка в данных от веб-клиента: {e}")
+
+# Motor Check		
 qik_port = None
 try:
 	logger.info("Qik Motor check...")
@@ -39,49 +87,49 @@ finally:
 	if qik_port and qik_port.is_open:
 		qik_port.close()
 
-
-try:
-	while True:
-		if pad.is_connected():
-			active_keys = pad.read_events()
-			
-			ls, rs = utils.joystick_to_diff_control(
-			active_keys[ABS_X], 
-			active_keys[ABS_Y], 
-				dead_zone
-			)
-			
-			motor_control.set_speed(ls, rs)
-			logger.debug(f"Left {ls}, Right: {rs}")
-
-		else:
-			# Приоритет №2: Веб-интерфейс
-			web_ls, web_rs = web_commands.get_speed()
-			if web_ls is not None and web_rs is not None:
-				logger.debug(f"Команда из веба -> Левый: {web_ls}, Правый: {web_rs}")
-				motor_control.set_speed(web_ls, web_rs)
-				# Сбрасываем команду, чтобы робот не ехал бесконечно по последней команде
-				web_commands.clear()
+def motor_control_loop():
+	logger.info("Запуск основного цикла управления моторами...")
+	try:
+		while True:
+			# Приоритет №1: Геймпад
+			if pad.is_connected():
+				active_keys = pad.read_events()
+				ls, rs = utils.joystick_to_diff_control(
+					active_keys[ABS_X], 
+					active_keys[ABS_Y], 
+					dead_zone
+				)
+				motor_control.set_speed(ls, rs)
 			else:
-				# Если нет никаких команд - стоп
-				logger.debug("Нет активных команд. Остановка моторов.")
-				motor_control.stop_all()
-		
-		# Попытка подключения геймпада, если он не активен
-		if not pad.is_connected():
-			logger.info("Геймпад не найден, попытка переподключения...")
-			pad.connect()
+				# Приоритет №2: Веб-интерфейс
+				web_ls, web_rs = web_commands.get_speed()
+				if web_ls is not None and web_rs is not None:
+					motor_control.set_speed(web_ls, web_rs)
+					# Сбрасываем команду, чтобы робот не ехал бесконечно
+					web_commands.clear()
+				else:
+					motor_control.stop_all()
+			
+			if not pad.is_connected():
+				pad.connect()
 
-		sleep(timeout)
+			sleep(timeout)
+	finally:
+		logger.info("Цикл управления моторами завершен. Остановка моторов.")
+		motor_control.stop_all()
 
-		sleep(timeout)
-		motor_control.print_motor_currents()
+	
+if __name__ == '__main__':
+    try:
+        # Создаем и запускаем поток для управления моторами
+        motor_thread = Thread(target=motor_control_loop, daemon=True)
+        motor_thread.start()
+        
+        # Запускаем веб-сервер в основном потоке. Он будет работать, пока не будет прерван.
+        logger.info("Запуск веб-сервера на http://0.0.0.0:5000")
+        socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
 
-except KeyboardInterrupt:
-	logger.info("Получен сигнал завершения (Ctrl+C).")
-except Exception as e:
-	logger.critical(f"В основном цикле произошла критическая ошибка: {e}", exc_info=True)
-finally:
-	# Этот блок гарантирует, что моторы будут остановлены при любом выходе из скрипта.
-	logger.info("Завершение работы. Остановка всех моторов.")
-	motor_control.stop_all()
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал KeyboardInterrupt. Завершение работы...")
+    finally:
+        logger.info("Программа завершена.")

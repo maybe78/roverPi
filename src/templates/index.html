@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoverPi Control</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #222; color: #ddd; display: flex; flex-direction: column; align-items: center; }
+  #video-stream { margin-top: 20px; border: 2px solid #444; border-radius: 8px; }
+  #joystick { margin-top: 20px; width: 200px; height: 200px; }
+</style>
+</head>
+<body>
+<h1>RoverPi Remote Control</h1>
+
+<img id="video-stream" src="http://192.168.0.38:8080/?action=stream" alt="Video Stream" width="640" height="480">
+
+<div id="joystick"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client/dist/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.7.3/dist/nipplejs.min.js"></script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>
