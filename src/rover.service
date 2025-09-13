@@ -1,7 +1,7 @@
 [Unit]
 Description=Rover robot 
-Wants=dev-video0.device
-After=network.target dev-video0.device
+Wants=dev-video0.device dev-input-js0.device
+After=network.target dev-video0.device dev-input-js0.device
 
 [Service]
 Type=simple
