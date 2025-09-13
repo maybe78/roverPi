@@ -1,39 +1,29 @@
-# web_commands.py
-
 import threading
+import time
 
 class WebCommands:
-    """
-    Потокобезопасный класс для хранения и управления командами,
-    поступающими из веб-интерфейса.
-    """
     def __init__(self):
-        self._ls = None
-        self._rs = None
-        self._lock = threading.Lock()
-
-    def get_speed(self):
-        """
-        Потокобезопасно получает последние команды скорости.
-        Возвращает кортеж (ls, rs).
-        """
-        with self._lock:
-            return self._ls, self._rs
-
+        self.lock = threading.Lock()
+        self.last_command_time = 0
+        self.ls = None
+        self.rs = None
+        self.command_timeout = 0.5  # Команды устаревают через 500ms
+    
     def set_speed(self, ls, rs):
-        """
-        Потокобезопасно устанавливает новые команды скорости.
-        Этот метод будет вызываться из потока веб-сервера.
-        """
-        with self._lock:
-            self._ls = ls
-            self._rs = rs
-            
+        with self.lock:
+            self.ls = ls
+            self.rs = rs
+            self.last_command_time = time.time()
+    
+    def get_speed(self):
+        with self.lock:
+            # Проверяем не устарела ли команда
+            if time.time() - self.last_command_time > self.command_timeout:
+                self.ls = None
+                self.rs = None
+            return self.ls, self.rs
+    
     def clear(self):
-        """
-        Потокобезопасно сбрасывает команды.
-        """
-        with self._lock:
-            self._ls = None
-            self._rs = None
-
+        with self.lock:
+            self.ls = None
+            self.rs = None
