@@ -1,17 +1,67 @@
 import asyncio
 import logging
 import threading
+import time
+import psutil
+import numpy as np
 from aiortc import RTCPeerConnection, MediaStreamTrack, RTCSessionDescription, RTCConfiguration, RTCIceServer
 from aiortc.contrib.media import MediaPlayer
 from av import VideoFrame
-import numpy as np
-import weakref
+import atexit
 
 logger = logging.getLogger('webrtc')
 
+class PerformanceMonitor:
+    """
+    Мониторинг производительности для отображения на видео
+    """
+    def __init__(self):
+        self.frame_count = 0
+        self.fps_start_time = time.time()
+        self.current_fps = 0.0
+        self.last_fps_update = 0
+        
+    def update_fps(self):
+        """Обновляет счетчик FPS"""
+        self.frame_count += 1
+        current_time = time.time()
+        
+        # Обновляем FPS каждые 30 кадров или каждые 2 секунды
+        if self.frame_count >= 30 or (current_time - self.last_fps_update) >= 2.0:
+            time_diff = current_time - self.fps_start_time
+            if time_diff > 0:
+                self.current_fps = self.frame_count / time_diff
+            
+            # Сбрасываем счетчики
+            self.frame_count = 0
+            self.fps_start_time = current_time
+            self.last_fps_update = current_time
+            
+    def get_system_info(self):
+        """Получает информацию о системе"""
+        try:
+            cpu_percent = psutil.cpu_percent(interval=None)  # Мгновенное значение
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+            
+            return {
+                'fps': self.current_fps,
+                'cpu': cpu_percent,
+                'memory': memory_percent,
+                'temp': 'N/A'
+            }
+        except Exception as e:
+            logger.error(f"Error getting system info: {e}")
+            return {
+                'fps': self.current_fps,
+                'cpu': 0.0,
+                'memory': 0.0,
+                'temp': 'N/A'
+            }
+
 class SharedVideoSource:
     """
-    Общий источник видео для всех клиентов
+    Общий источник видео для всех клиентов с мониторингом производительности
     """
     _instance = None
     _lock = threading.Lock()
@@ -33,6 +83,8 @@ class SharedVideoSource:
         self.subscribers = set()
         self._stopped = False
         self._lock = threading.Lock()
+        self._shutdown_called = False
+        self.performance_monitor = PerformanceMonitor()
         
         # Создаем единственный MediaPlayer
         try:
@@ -67,29 +119,172 @@ class SharedVideoSource:
                 logger.warning("Using shared test source instead of camera")
         
         self._initialized = True
+        atexit.register(self._emergency_cleanup)
     
     def subscribe(self, video_track):
         """Подписывает видео трек на получение кадров"""
+        if self._stopped:
+            return False
+            
         with self._lock:
             self.subscribers.add(video_track)
             logger.info(f"Video track subscribed. Total subscribers: {len(self.subscribers)}")
+        return True
     
     def unsubscribe(self, video_track):
         """Отписывает видео трек"""
         with self._lock:
             self.subscribers.discard(video_track)
             logger.info(f"Video track unsubscribed. Total subscribers: {len(self.subscribers)}")
+    
+    def draw_info_overlay(self, img, sys_info, client_count):
+        """Рисует информационную панель на изображении с подписями"""
+        try:
+            # Размеры панели
+            panel_height = 80
+            panel_width = 300
             
-            # Если больше нет подписчиков, можно остановить источник
-            if len(self.subscribers) == 0:
-                logger.info("No more subscribers, keeping source active for future connections")
+            # Создаем темную полупрозрачную панель
+            overlay = img.copy()
+            overlay[10:10+panel_height, 10:10+panel_width] = [0, 30, 0]  # Темно-зеленый фон
+            
+            # Смешиваем с оригинальным изображением (эффект прозрачности)
+            alpha = 0.8
+            img[10:10+panel_height, 10:10+panel_width] = (
+                alpha * overlay[10:10+panel_height, 10:10+panel_width] + 
+                (1 - alpha) * img[10:10+panel_height, 10:10+panel_width]
+            ).astype(np.uint8)
+            
+            # Добавляем рамку
+            img[10:12, 10:10+panel_width] = [0, 255, 0]  # Верхняя
+            img[10+panel_height-2:10+panel_height, 10:10+panel_width] = [0, 255, 0]  # Нижняя
+            img[10:10+panel_height, 10:12] = [0, 255, 0]  # Левая
+            img[10:10+panel_height, 10+panel_width-2:10+panel_width] = [0, 255, 0]  # Правая
+            
+            # === ПОДПИСИ ПОЛОСОК ===
+            # FPS подпись (белыми пикселями)
+            self.draw_text(img, "FPS", 15, 18, [255, 255, 255])
+            
+            # CPU подпись
+            self.draw_text(img, "CPU", 15, 33, [255, 255, 255])
+            
+            # MEM подпись  
+            self.draw_text(img, "MEM", 15, 48, [255, 255, 255])
+            
+            # CLIENTS подпись
+            self.draw_text(img, "CLI", 15, 63, [255, 255, 255])
+            
+            # === ПОЛОСКИ С ДАННЫМИ ===
+            # FPS полоска (зеленая = хорошо, красная = плохо)
+            fps_bar_width = int((sys_info['fps'] / 20.0) * 180)  # Немного уменьшили ширину для подписей
+            fps_color = [0, 255, 0] if sys_info['fps'] > 10 else [0, 255, 255] if sys_info['fps'] > 5 else [0, 0, 255]
+            img[20:25, 60:60+min(fps_bar_width, 180)] = fps_color
+            
+            # Рамка для FPS полоски
+            img[19:20, 60:240] = [100, 100, 100]  # Верх
+            img[25:26, 60:240] = [100, 100, 100]  # Низ
+            img[19:26, 59:60] = [100, 100, 100]  # Лево
+            img[19:26, 240:241] = [100, 100, 100]  # Право
+            
+            # Значение FPS
+            fps_text = f"{sys_info['fps']:.1f}"
+            self.draw_text(img, fps_text, 250, 18, [255, 255, 255])
+            
+            # CPU полоска
+            cpu_bar_width = int((sys_info['cpu'] / 100.0) * 180)
+            cpu_color = [0, 255, 0] if sys_info['cpu'] < 50 else [0, 255, 255] if sys_info['cpu'] < 80 else [0, 0, 255]
+            img[35:40, 60:60+min(cpu_bar_width, 180)] = cpu_color
+            
+            # Рамка для CPU полоски
+            img[34:35, 60:240] = [100, 100, 100]
+            img[40:41, 60:240] = [100, 100, 100]
+            img[34:41, 59:60] = [100, 100, 100]
+            img[34:41, 240:241] = [100, 100, 100]
+            
+            # Значение CPU
+            cpu_text = f"{sys_info['cpu']:.0f}%"
+            self.draw_text(img, cpu_text, 250, 33, [255, 255, 255])
+            
+            # Memory полоска
+            mem_bar_width = int((sys_info['memory'] / 100.0) * 180)
+            mem_color = [0, 255, 0] if sys_info['memory'] < 70 else [0, 255, 255] if sys_info['memory'] < 90 else [0, 0, 255]
+            img[50:55, 60:60+min(mem_bar_width, 180)] = mem_color
+            
+            # Рамка для Memory полоски
+            img[49:50, 60:240] = [100, 100, 100]
+            img[55:56, 60:240] = [100, 100, 100]
+            img[49:56, 59:60] = [100, 100, 100]
+            img[49:56, 240:241] = [100, 100, 100]
+            
+            # Значение Memory
+            mem_text = f"{sys_info['memory']:.0f}%"
+            self.draw_text(img, mem_text, 250, 48, [255, 255, 255])
+            
+            # Индикатор клиентов
+            for i in range(min(client_count, 8)):  # Максимум 8 точек
+                x = 60 + i * 20
+                img[65:70, x:x+15] = [0, 255, 0]  # Зеленые точки для каждого клиента
+                
+            # Значение клиентов
+            client_text = str(client_count)
+            self.draw_text(img, client_text, 250, 63, [255, 255, 255])
+                
+        except Exception as e:
+            logger.error(f"Error drawing overlay: {e}")
+            # В случае ошибки просто рисуем простой зеленый прямоугольник
+            img[10:40, 10:150] = [0, 255, 0]
+
+    def draw_text(self, img, text, x, y, color):
+        """Рисует простой пиксельный текст"""
+        try:
+            # Простые 3x5 пиксельных символов
+            char_patterns = {
+                'F': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,0,0]],
+                'P': [[1,1,1],[1,0,1],[1,1,1],[1,0,0],[1,0,0]],
+                'S': [[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
+                'C': [[1,1,1],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+                'U': [[1,0,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+                'M': [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+                'E': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+                'L': [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+                'I': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+                '0': [[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+                '1': [[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
+                '2': [[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]],
+                '3': [[1,1,1],[0,0,1],[1,1,1],[0,0,1],[1,1,1]],
+                '4': [[1,0,1],[1,0,1],[1,1,1],[0,0,1],[0,0,1]],
+                '5': [[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
+                '6': [[1,1,1],[1,0,0],[1,1,1],[1,0,1],[1,1,1]],
+                '7': [[1,1,1],[0,0,1],[0,0,1],[0,0,1],[0,0,1]],
+                '8': [[1,1,1],[1,0,1],[1,1,1],[1,0,1],[1,1,1]],
+                '9': [[1,1,1],[1,0,1],[1,1,1],[0,0,1],[1,1,1]],
+                '.': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,1,0]],
+                '%': [[1,0,1],[0,0,1],[0,1,0],[1,0,0],[1,0,1]],
+                ' ': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]]
+            }
+            
+            char_x = x
+            for char in text.upper():
+                if char in char_patterns:
+                    pattern = char_patterns[char]
+                    for row_idx, row in enumerate(pattern):
+                        for col_idx, pixel in enumerate(row):
+                            if pixel:
+                                px = char_x + col_idx
+                                py = y + row_idx
+                                if px < img.shape[1] and py < img.shape[0]:
+                                    img[py, px] = color
+                    char_x += 4  # Пробел между символами
+                else:
+                    char_x += 4  # Пробел для неизвестного символа
+                    
+        except Exception as e:
+            logger.error(f"Error drawing text '{text}': {e}")
     
     async def get_frame(self):
-        """Получает кадр от общего источника"""
+        """Получает кадр от общего источника с информационной панелью"""
         if self._stopped or not self.track:
-            # Возвращаем черный кадр если остановлен
             img = np.zeros((480, 640, 3), dtype=np.uint8)
-            # Красный текст "STOPPED"
             img[240:280, 250:390] = [0, 0, 255]
             frame = VideoFrame.from_ndarray(img, format="bgr24")
             return frame
@@ -97,18 +292,23 @@ class SharedVideoSource:
         try:
             frame = await self.track.recv()
             
+            # Обновляем FPS
+            self.performance_monitor.update_fps()
+            
             # Конвертируем в numpy array для обработки
             img = frame.to_ndarray(format="bgr24")
             
-            # Добавляем индикатор количества клиентов
+            # Получаем информацию о системе
+            sys_info = self.performance_monitor.get_system_info()
+            
+            # Получаем количество клиентов
             with self._lock:
                 client_count = len(self.subscribers)
             
-            # Зеленый прямоугольник с количеством клиентов
-            img[10:40, 10:200] = [0, 255, 0]
+            # Рисуем информационную панель
+            self.draw_info_overlay(img, sys_info, client_count)
             
             # Создаем КОПИЮ кадра для каждого получателя
-            # (важно, чтобы каждый трек получил свой кадр)
             new_frame = VideoFrame.from_ndarray(img.copy(), format="bgr24")
             new_frame.pts = frame.pts
             new_frame.time_base = frame.time_base
@@ -119,30 +319,33 @@ class SharedVideoSource:
             if not self._stopped:
                 logger.error(f"Error getting shared frame: {e}")
             
-            # В случае ошибки возвращаем черный кадр
+            # В случае ошибки возвращаем черный кадр с ошибкой
             img = np.zeros((480, 640, 3), dtype=np.uint8)
-            img[240:280, 320:420] = [0, 0, 255]  # Красный прямоугольник
+            img[240:280, 320:420] = [0, 0, 255]
             frame = VideoFrame.from_ndarray(img, format="bgr24")
             return frame
     
-    def shutdown(self):
-        """Останавливает общий источник"""
+    def _emergency_cleanup(self):
+        """Экстренная очистка при завершении программы"""
+        if not self._shutdown_called:
+            logger.warning("Emergency cleanup of shared video source")
+            self._stopped = True
+    
+    def safe_shutdown(self):
+        """Безопасная остановка"""
+        if self._shutdown_called:
+            return
+            
+        self._shutdown_called = True
         self._stopped = True
+        
         with self._lock:
             self.subscribers.clear()
-            
-        try:
-            if self.track and hasattr(self.track, 'stop'):
-                self.track.stop()
-            
-            # MediaPlayer освобождается при удалении ссылки
-            self.player = None
-            self.track = None
-            logger.info("Shared video source stopped")
-        except Exception as e:
-            logger.error(f"Error stopping shared video source: {e}")
+        
+        self.track = None
+        logger.info("Shared video source marked for shutdown (MediaPlayer will cleanup automatically)")
 
-
+# Остальные классы остаются без изменений...
 class VideoTransformTrack(MediaStreamTrack):
     """
     Видео трек, который получает кадры от общего источника
@@ -153,15 +356,17 @@ class VideoTransformTrack(MediaStreamTrack):
         super().__init__()
         self._stopped = False
         self.shared_source = SharedVideoSource()
-        self.shared_source.subscribe(self)
-        logger.info("VideoTransformTrack created and subscribed to shared source")
+        
+        if not self.shared_source.subscribe(self):
+            logger.error("Failed to subscribe to shared video source")
+        else:
+            logger.info("VideoTransformTrack created and subscribed to shared source")
 
     async def recv(self):
         """
         Получает кадр от общего источника
         """
         if self._stopped:
-            # Возвращаем черный кадр если остановлен
             img = np.zeros((480, 640, 3), dtype=np.uint8)
             frame = VideoFrame.from_ndarray(img, format="bgr24")
             return frame
@@ -170,11 +375,11 @@ class VideoTransformTrack(MediaStreamTrack):
 
     def stop(self):
         """Останавливает трек"""
-        self._stopped = True
-        if hasattr(self, 'shared_source'):
-            self.shared_source.unsubscribe(self)
-        logger.info("VideoTransformTrack stopped and unsubscribed")
-
+        if not self._stopped:
+            self._stopped = True
+            if hasattr(self, 'shared_source'):
+                self.shared_source.unsubscribe(self)
+            logger.info("VideoTransformTrack stopped and unsubscribed")
 
 def fix_safari_sdp(sdp_text):
     """
@@ -201,7 +406,6 @@ def fix_safari_sdp(sdp_text):
             fixed_lines.append(line)
     
     return '\r\n'.join(fixed_lines)
-
 
 class WebRTCHandler:
     """
@@ -377,9 +581,9 @@ class WebRTCHandler:
         logger.info("Starting WebRTC shutdown...")
         
         try:
-            # Сначала останавливаем общий источник видео
+            # Сначала останавливаем общий источник видео - ИСПРАВЛЕНО
             shared_source = SharedVideoSource()
-            shared_source.shutdown()
+            shared_source.safe_shutdown()  # Используем safe_shutdown вместо shutdown
             
             # Затем закрываем все peer connections
             future = asyncio.run_coroutine_threadsafe(

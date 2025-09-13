@@ -4,5 +4,6 @@ pyudev
 opencv-python-headless
 flask
 flask-socketio
-aiortс
- aiohttp
+aiortc
+aiohttp
+psutil
