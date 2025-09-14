@@ -14,7 +14,7 @@ An all-terrain Raspberry Pi-based robot project, controlled via a Bluetooth game
       - [1. Clone the Repository](#1-clone-the-repository)
       - [2. Set Up Python Environment](#2-set-up-python-environment)
   - [Peripheral Setup](#peripheral-setup)
-      - [1. Video Stream (mjpg-streamer)](#1-video-stream-mjpg-streamer)
+      - [1. Video Stream (RaspberryPi-WebRTC)](#1-video-stream-raspberrypi-webrtc)
         - [Build and Install](#build-and-install)
         - [Manual Stream Start](#manual-stream-start)
       - [2. Bluetooth Gamepad](#2-bluetooth-gamepad)
@@ -22,6 +22,8 @@ An all-terrain Raspberry Pi-based robot project, controlled via a Bluetooth game
   - [Running the Robot](#running-the-robot)
       - [Service Installation](#service-installation)
       - [Service Management](#service-management)
+  - [Web Interface](#web-interface)
+    - [Key Features](#key-features)
 
 ---
 
@@ -51,7 +53,7 @@ Run `sudo raspi-config` and apply the following settings:
 Update your system and install all required packages with a single command:
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt install git python3-pip python3-venv joystick libgl1 build-essential cmake libjpeg-dev
+sudo apt install git python3-pip python3-venv joystick libgl1 build-essential cmake libjpeg-dev libcamera0.5 libmosquitto1 libavformat59 libswscale6
 ```
 ---
 
@@ -79,26 +81,32 @@ pip install -r requirements.txt
 
 ## Peripheral Setup
 
-#### 1. Video Stream (mjpg-streamer)
-This project uses `mjpg-streamer` to broadcast video from the USB camera.
+#### 1. Video Stream (RaspberryPi-WebRTC)
+This project uses `RaspberryPi-WebRTC` to broadcast video from the USB camera.
 
 ##### Build and Install
 Clone the repository and build the source
 ```bash
-git clone https://github.com/jacksonliam/mjpg-streamer.git
-cd mjpg-streamer/mjpg-streamer-experimental
-make
-sudo make install
-cd ../../ # Return to the project root
+cd /home/volodya/
+wget https://github.com/TzuHuanTai/RaspberryPi-WebRTC/releases/latest/download/pi-webrtc-v1.2.0_raspios-bookworm-arm64.tar.gz
+tar -xzf pi-webrtc-v1.2.0_raspios-bookworm-arm64.tar.gz
+chmod +x pi-webrtc
 ```
 
 ##### Manual Stream Start
 To start the video stream manually for testing, run the following command. Make sure to adjust the paths if `mjpg-streamer` was installed in a different location.
 Start the stream in the background
 ```bash
-mjpg_streamer -i "input_uvc.so -d /dev/video0 -r 1280x720 -f 30" -o "output_http.so -p 8080 -w /usr/local/share/mjpg-streamer/www" &
+/home/volodya/pi-webrtc \
+  --camera=v4l2:0 \
+  --v4l2-format=h264 \ 
+  --fps=15 \
+  --width=640 \
+  --height=480 \
+  --use-whep \ 
+  --http-port=8080 \     
+  --hw-accel              
 ```
-The video feed will be available at `http://<Raspberry_Pi_IP>:8080/?action=stream`.
 
 #### 2. Bluetooth Gamepad
 Use the `bluetoothctl` utility to pair your gamepad.

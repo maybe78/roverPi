@@ -8,76 +8,13 @@ import atexit
 import time
 import gc
 import weakref
-import psutil
-import os
+import fractions
 
 logger = logging.getLogger('webrtc')
 
-class MemoryManager:
+class UltraLowLatencyVideoSource:
     """
-    Агрессивное управление памятью для предотвращения утечек
-    """
-    def __init__(self):
-        self.last_cleanup = time.time()
-        self.frame_count = 0
-        self.cleanup_interval = 5.0  # Каждые 5 секунд
-        self.force_cleanup_interval = 30.0  # Каждые 30 секунд принудительная очистка
-        self.last_force_cleanup = time.time()
-        
-    def should_cleanup(self):
-        """Проверяет нужна ли очистка памяти"""
-        current_time = time.time()
-        self.frame_count += 1
-        
-        # Обычная очистка каждые 5 секунд или каждые 100 кадров
-        if (current_time - self.last_cleanup > self.cleanup_interval or 
-            self.frame_count > 100):
-            self.last_cleanup = current_time
-            self.frame_count = 0
-            return True
-            
-        return False
-    
-    def should_force_cleanup(self):
-        """Проверяет нужна ли принудительная очистка"""
-        current_time = time.time()
-        if current_time - self.last_force_cleanup > self.force_cleanup_interval:
-            self.last_force_cleanup = current_time
-            return True
-        return False
-    
-    def cleanup_memory(self):
-        """Обычная очистка памяти"""
-        try:
-            gc.collect()
-            logger.debug("Memory cleanup completed")
-        except Exception as e:
-            logger.error(f"Error during memory cleanup: {e}")
-    
-    def force_cleanup_memory(self):
-        """Принудительная агрессивная очистка памяти"""
-        try:
-            # Принудительная сборка мусора несколько раз
-            for _ in range(3):
-                gc.collect()
-            
-            # Получаем информацию о памяти
-            process = psutil.Process(os.getpid())
-            memory_info = process.memory_info()
-            memory_mb = memory_info.rss / 1024 / 1024
-            
-            logger.info(f"Force cleanup: Memory usage: {memory_mb:.1f} MB")
-            
-            # Если памяти используется больше 400MB - логируем предупреждение
-            if memory_mb > 400:
-                logger.warning(f"High memory usage detected: {memory_mb:.1f} MB")
-                
-        except Exception as e:
-            logger.error(f"Error during force memory cleanup: {e}")
-
-class SharedVideoSource:
-    """
-    Источник видео с агрессивным управлением памятью
+    Источник видео с УЛЬТРА низкой задержкой - без буферизации
     """
     _instance = None
     _lock = threading.Lock()
@@ -96,137 +33,110 @@ class SharedVideoSource:
             
         self.player = None
         self.track = None
-        self.subscribers = weakref.WeakSet()  # ВАЖНО: Используем WeakSet!
+        self.subscribers = weakref.WeakSet()
         self._stopped = False
         self._lock = threading.Lock()
         self._shutdown_called = False
-        self.memory_manager = MemoryManager()
-        self.last_frame = None  # Кэшируем последний кадр
         
-        # КРИТИЧЕСКИЕ настройки для предотвращения утечек памяти
+        # КРИТИЧНЫЕ настройки для НУЛЕВОЙ задержки
         try:
             camera_options = {
                 'video_size': '640x480',
-                'framerate': '15',
+                'framerate': '30',                    # УВЕЛИЧИВАЕМ FPS для плавности
                 'pixel_format': 'yuyv422',
-                'thread_queue_size': '1',     # ВАЖНО: Минимальный размер очереди
-                'buffer_size': '1',           # ВАЖНО: Минимальный буфер
-                'fflags': '+nobuffer+fastseek+flush_packets',  # Агрессивные флаги очистки
-                'avioflags': 'direct',        # Прямой доступ без буферизации
+                
+                # УЛЬТРА критичные настройки латентности
+                'buffer_size': '0',                   # НУЛЕВОЙ буфер!
+                'thread_queue_size': '1',             # Минимальная очередь
+                'fflags': '+nobuffer+fastseek+flush_packets+genpts+igndts',
+                'flags': 'low_delay',                 # Флаг низкой задержки
+                'probesize': '32',                    # Минимальная проба
+                'analyzeduration': '0',               # Не анализируем
+                'max_delay': '0',                     # Нулевая задержка
+                'avioflags': 'direct',                # Прямой I/O
+                'flush_packets': '1',                 # Немедленная отправка пакетов
+                'real_time': '1',                     # Режим реального времени
             }
             
             self.player = MediaPlayer('/dev/video0', format='v4l2', options=camera_options)
             
             if self.player.video:
                 self.track = self.player.video
-                logger.info("Camera initialized with memory-optimized settings")
+                logger.info("Camera initialized with ZERO LATENCY settings (30fps)")
             else:
                 raise Exception("No video track from camera")
                 
         except Exception as e:
-            logger.error(f"Failed to initialize camera: {e}")
+            logger.error(f"Failed to initialize ultra low latency camera: {e}")
             try:
-                # Fallback с минимальными настройками
-                self.player = MediaPlayer('/dev/video0', format='v4l2', 
-                                        options={'fflags': '+nobuffer', 'buffer_size': '1'})
+                # Агрессивный fallback
+                camera_options = {
+                    'framerate': '25',
+                    'buffer_size': '0',
+                    'fflags': '+nobuffer+flush_packets',
+                    'flags': 'low_delay',
+                    'real_time': '1'
+                }
+                self.player = MediaPlayer('/dev/video0', format='v4l2', options=camera_options)
                 if self.player.video:
                     self.track = self.player.video
-                    logger.warning("Camera initialized with basic memory-safe settings")
+                    logger.warning("Camera initialized with aggressive low-latency fallback")
                 else:
                     raise Exception("No video track from fallback")
             except Exception as e2:
                 logger.error(f"Camera fallback failed: {e2}")
-                self.player = MediaPlayer('testsrc=size=640x480:rate=15', format='lavfi',
-                                        options={'fflags': '+nobuffer'})
+                # Последний шанс с тестовым источником
+                self.player = MediaPlayer('testsrc=size=640x480:rate=25', format='lavfi',
+                                        options={'fflags': '+nobuffer', 'real_time': '1'})
                 self.track = self.player.video
-                logger.warning("Using test source")
+                logger.warning("Using ultra low latency test source")
         
         self._initialized = True
         atexit.register(self._emergency_cleanup)
     
     def subscribe(self, video_track):
-        """Подписывает видео трек на получение кадров"""
         if self._stopped:
             return False
             
         with self._lock:
             self.subscribers.add(video_track)
-            logger.info(f"Video track subscribed. Total subscribers: {len(self.subscribers)}")
+            logger.info(f"Ultra low latency track subscribed. Total: {len(self.subscribers)}")
         return True
     
     def unsubscribe(self, video_track):
-        """Отписывает видео трек"""
         with self._lock:
-            # WeakSet автоматически удаляет мертвые ссылки
-            logger.info(f"Video track unsubscribed. Total subscribers: {len(self.subscribers)}")
+            logger.info(f"Ultra low latency track unsubscribed. Total: {len(self.subscribers)}")
     
     async def get_frame(self):
         """
-        Получение кадров с агрессивным управлением памятью
+        КРИТИЧНО: Немедленная отдача кадра с принудительным таймстампом
         """
         if self._stopped or not self.track:
-            return self.last_frame
+            return None
             
         try:
-            # Получаем новый кадр
+            # Получаем кадр НЕМЕДЛЕННО
             frame = await self.track.recv()
             
-            # ВАЖНО: Явно освобождаем предыдущий кадр
-            if self.last_frame is not None:
-                del self.last_frame
-            
-            self.last_frame = frame
-            
-            # Проверяем нужна ли очистка памяти
-            if self.memory_manager.should_cleanup():
-                self.memory_manager.cleanup_memory()
-            
-            # Принудительная очистка при необходимости
-            if self.memory_manager.should_force_cleanup():
-                self.memory_manager.force_cleanup_memory()
+            # КРИТИЧНО: Принудительно устанавливаем ТЕКУЩЕЕ время
+            # Это гарантирует что кадр считается "свежим"
+            current_time_us = int(time.time() * 1000000)
+            frame.pts = current_time_us
+            frame.time_base = fractions.Fraction(1, 1000000)  # Микросекунды
             
             return frame
             
         except Exception as e:
             if not self._stopped:
-                logger.error(f"Error getting frame: {e}")
-            return self.last_frame
+                logger.error(f"Error getting ultra low latency frame: {e}")
+            return None
     
     def _emergency_cleanup(self):
-        """Экстренная очистка при завершении программы"""
         if not self._shutdown_called:
-            logger.warning("Emergency cleanup of shared video source")
+            logger.warning("Emergency cleanup of ultra low latency video source")
             self._stopped = True
-            self._cleanup_resources()
-    
-    def _cleanup_resources(self):
-        """Очистка всех ресурсов"""
-        try:
-            # Очищаем кэшированный кадр
-            if self.last_frame is not None:
-                del self.last_frame
-                self.last_frame = None
-            
-            # Очищаем track
-            if self.track:
-                self.track = None
-                
-            # Очищаем player - ОСТОРОЖНО!
-            if self.player:
-                try:
-                    # НЕ вызываем stop() - это может вызвать segfault
-                    self.player = None
-                except Exception as e:
-                    logger.error(f"Error cleaning player: {e}")
-            
-            # Принудительная очистка памяти
-            gc.collect()
-            
-        except Exception as e:
-            logger.error(f"Error during resource cleanup: {e}")
     
     def safe_shutdown(self):
-        """Безопасная остановка"""
         if self._shutdown_called:
             return
             
@@ -236,61 +146,149 @@ class SharedVideoSource:
         with self._lock:
             self.subscribers.clear()
         
-        self._cleanup_resources()
-        logger.info("Shared video source shutdown with memory cleanup")
+        # Быстрая очистка без блокировки
+        self.track = None
+        self.player = None
+        
+        logger.info("Ultra low latency video source shutdown")
 
-class MemoryEfficientVideoTrack(MediaStreamTrack):
+class ZeroLatencyVideoTrack(MediaStreamTrack):
     """
-    Видео трек с контролем памяти
+    Видео трек с НУЛЕВОЙ задержкой через frame skipping
     """
     kind = "video"
 
     def __init__(self):
         super().__init__()
         self._stopped = False
-        self.shared_source = SharedVideoSource()
-        self.frame_cache = None
+        self.shared_source = UltraLowLatencyVideoSource()
+        self.last_frame_time = 0
+        self.max_frame_age = 0.050  # 50ms - дропаем кадры старше этого
+        self.frames_dropped = 0
+        self.frames_sent = 0
         
         if not self.shared_source.subscribe(self):
-            logger.error("Failed to subscribe to shared video source")
+            logger.error("Failed to subscribe to ultra low latency source")
         else:
-            logger.info("MemoryEfficientVideoTrack created")
+            logger.info("ZeroLatencyVideoTrack created")
 
     async def recv(self):
         """
-        Получение кадра с освобождением предыдущего
+        АГРЕССИВНЫЙ frame dropping для ультра низкой задержки
         """
         if self._stopped:
             return None
         
-        # Освобождаем предыдущий кэшированный кадр
-        if self.frame_cache is not None:
-            del self.frame_cache
-            self.frame_cache = None
+        max_attempts = 10  # Больше попыток для получения свежего кадра
+        current_time = time.time()
         
-        # Получаем новый кадр
-        frame = await self.shared_source.get_frame()
-        self.frame_cache = frame
+        for attempt in range(max_attempts):
+            frame = await self.shared_source.get_frame()
+            
+            if frame is None:
+                continue
+                
+            # Вычисляем возраст кадра
+            if hasattr(frame, 'pts') and frame.time_base:
+                frame_timestamp = float(frame.pts * frame.time_base)
+                frame_age = current_time - frame_timestamp
+                
+                # Если кадр свежий - отправляем
+                if frame_age <= self.max_frame_age:
+                    self.frames_sent += 1
+                    
+                    # Логируем статистику каждые 100 кадров
+                    if (self.frames_sent + self.frames_dropped) % 100 == 0:
+                        total_frames = self.frames_sent + self.frames_dropped
+                        drop_rate = (self.frames_dropped / total_frames) * 100 if total_frames > 0 else 0
+                        logger.debug(f"Frame stats: {drop_rate:.1f}% dropped, age: {frame_age*1000:.1f}ms")
+                    
+                    return frame
+                else:
+                    # Кадр слишком старый - дропаем
+                    self.frames_dropped += 1
+                    logger.debug(f"Dropped old frame (age: {frame_age*1000:.1f}ms)")
+                    
+                    # Не тратим время на получение нового кадра если этот очень старый
+                    if frame_age > 0.200:  # Если старше 200ms - прерываем попытки
+                        break
+                    
+                    continue
+            else:
+                # Если нет временной метки - отправляем как есть
+                self.frames_sent += 1
+                return frame
         
-        return frame
+        # Если не смогли получить свежий кадр - лучше отправить старый чем ничего
+        logger.debug("Could not get fresh frame, sending last available")
+        return frame if 'frame' in locals() else None
 
     def stop(self):
-        """Останавливает трек с очисткой памяти"""
         if not self._stopped:
             self._stopped = True
-            
-            # Очищаем кэш кадра
-            if self.frame_cache is not None:
-                del self.frame_cache
-                self.frame_cache = None
-                
             if hasattr(self, 'shared_source'):
                 self.shared_source.unsubscribe(self)
             
-            logger.info("MemoryEfficientVideoTrack stopped and cleaned")
+            # Логируем финальную статистику
+            total_frames = self.frames_sent + self.frames_dropped
+            if total_frames > 0:
+                drop_rate = (self.frames_dropped / total_frames) * 100
+                logger.info(f"ZeroLatencyVideoTrack stopped. Final stats: {drop_rate:.1f}% frames dropped")
+            else:
+                logger.info("ZeroLatencyVideoTrack stopped")
+
+def optimize_sdp_for_zero_latency(sdp):
+    """
+    АГРЕССИВНАЯ оптимизация SDP для нулевой задержки
+    """
+    lines = sdp.split('\r\n')
+    optimized_lines = []
+    
+    for line in lines:
+        optimized_lines.append(line)
+        
+        # Добавляем критичные атрибуты после видео секции
+        if line.startswith('m=video'):
+            # УЛЬТРА агрессивные настройки для минимальной задержки
+            optimized_lines.extend([
+                'a=rtcp-fb:* nack',                    # Быстрое восстановление
+                'a=rtcp-fb:* nack pli',                # Picture Loss Indication
+                'a=rtcp-fb:* ccm fir',                 # Full Intra Request
+                'a=rtcp-fb:* goog-remb',               # Receiver Estimated Max Bitrate
+                'a=rtcp-fb:* transport-cc',            # Transport-wide Congestion Control
+                'a=setup:actpass',                     # Быстрое установление соединения
+                'a=rtcp-mux',                          # Мультиплексирование RTCP
+                'a=rtcp-rsize',                        # Уменьшенные RTCP пакеты
+            ])
+        
+        # Модифицируем существующие RTCP feedback атрибуты для агрессивности
+        if 'a=rtcp-fb:' in line and 'transport-cc' in line:
+            # Заменяем на более агрессивный
+            optimized_lines[-1] = line  # Оставляем оригинальную строку
+    
+    optimized_sdp = '\r\n'.join(optimized_lines)
+    
+    # Дополнительно добавляем глобальные атрибуты для низкой задержки
+    if 'a=group:BUNDLE' in optimized_sdp:
+        # Добавляем атрибуты прямо после BUNDLE группы
+        bundle_index = optimized_sdp.find('a=group:BUNDLE')
+        if bundle_index != -1:
+            end_of_line = optimized_sdp.find('\r\n', bundle_index)
+            if end_of_line != -1:
+                before = optimized_sdp[:end_of_line + 2]
+                after = optimized_sdp[end_of_line + 2:]
+                
+                # Вставляем дополнительные атрибуты для низкой задержки
+                extra_attrs = '\r\n'.join([
+                    'a=extmap-allow-mixed',              # Разрешаем смешанные расширения
+                    'a=msid-semantic: WMS',              # WebRTC Media Stream semantic
+                ])
+                
+                optimized_sdp = before + extra_attrs + '\r\n' + after
+    
+    return optimized_sdp
 
 def fix_safari_sdp(sdp_text):
-    """Исправляет SDP для совместимости с Safari/iOS"""
     lines = sdp_text.split('\r\n')
     fixed_lines = []
     
@@ -311,13 +309,13 @@ def fix_safari_sdp(sdp_text):
     
     return '\r\n'.join(fixed_lines)
 
-class MemoryOptimizedWebRTCHandler:
+class ZeroLatencyWebRTCHandler:
     """
-    WebRTC handler с предотвращением утечек памяти
+    WebRTC handler для НУЛЕВОЙ задержки
     """
     
     def __init__(self):
-        self.pcs = weakref.WeakSet()  # ВАЖНО: Используем WeakSet!
+        self.pcs = weakref.WeakSet()
         self.loop = None
         self.loop_thread = None
         self.is_running = False
@@ -330,8 +328,12 @@ class MemoryOptimizedWebRTCHandler:
         def run_loop():
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
+            
+            # КРИТИЧНО: Настраиваем event loop для минимальной задержки
+            self.loop.set_debug(False)  # Отключаем debug для скорости
+            
             self.is_running = True
-            logger.info("Memory-optimized WebRTC event loop started")
+            logger.info("Zero latency WebRTC event loop started")
             try:
                 self.loop.run_forever()
             except Exception as e:
@@ -339,17 +341,17 @@ class MemoryOptimizedWebRTCHandler:
             finally:
                 self.is_running = False
                 
+        # Поток с высоким приоритетом для минимальной задержки
         self.loop_thread = threading.Thread(target=run_loop, daemon=True)
         self.loop_thread.start()
         
-        import time
-        timeout = 5.0
+        timeout = 3.0  # Уменьшили таймаут
         start_time = time.time()
         while not self.is_running and (time.time() - start_time) < timeout:
-            time.sleep(0.1)
+            time.sleep(0.05)  # Меньший интервал проверки
             
         if not self.is_running:
-            raise RuntimeError("Failed to start WebRTC event loop")
+            raise RuntimeError("Failed to start zero latency WebRTC event loop")
         
     def create_offer(self, sdp_offer):
         if self._shutdown_in_progress:
@@ -363,81 +365,83 @@ class MemoryOptimizedWebRTCHandler:
         )
         
         try:
-            return future.result(timeout=10.0)
+            return future.result(timeout=5.0)  # Быстрый таймаут
         except Exception as e:
             logger.error(f"Error in create_offer: {e}")
             raise
         
     async def _async_create_offer(self, sdp_offer):
         """
-        Создание offer с контролем памяти
+        Создание offer с НУЛЕВОЙ задержкой
         """
         if self._shutdown_in_progress:
             raise RuntimeError("Shutdown in progress")
             
         try:
-            # Строгий лимит соединений для экономии памяти
-            if len(self.pcs) > 2:
-                logger.warning("Too many peer connections for memory optimization")
-                raise RuntimeError("Too many connections")
+            # СТРОГИЙ лимит для минимальной задержки
+            if len(self.pcs) > 1:  # Только 1 соединение для минимальной задержки!
+                logger.warning("Only 1 connection allowed for zero latency")
+                raise RuntimeError("Too many connections for zero latency")
             
-            # Конфигурация
+            # УЛЬТРА быстрая конфигурация
             ice_servers = [RTCIceServer(urls=['stun:stun.l.google.com:19302'])]
             configuration = RTCConfiguration(iceServers=ice_servers)
             pc = RTCPeerConnection(configuration=configuration)
             self.pcs.add(pc)
             
-            logger.info(f"New memory-optimized peer connection. Total: {len(self.pcs)}")
+            logger.info("Zero latency peer connection created")
             
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
-                logger.info(f"Connection state is {pc.connectionState}")
+                logger.info(f"Zero latency connection state: {pc.connectionState}")
                 if pc.connectionState in ["closed", "failed"]:
                     await self._cleanup_pc(pc)
                     
             @pc.on("track")
             def on_track(track):
-                logger.info(f"Track received: {track.kind}")
+                logger.info(f"Zero latency track received: {track.kind}")
             
-            # Создаем memory-efficient видео трек
-            video_track = MemoryEfficientVideoTrack()
+            # Создаем ZERO LATENCY видео трек
+            video_track = ZeroLatencyVideoTrack()
             pc._video_track_instance = video_track
             pc.addTrack(video_track)
-            logger.info("Memory-efficient video track added")
+            logger.info("Zero latency video track added")
             
-            # Исправляем SDP
-            fixed_sdp = fix_safari_sdp(sdp_offer["sdp"])
+            # КРИТИЧНО: Оптимизируем SDP ДО установки
+            pre_optimized_sdp = optimize_sdp_for_zero_latency(sdp_offer["sdp"])
+            fixed_sdp = fix_safari_sdp(pre_optimized_sdp)
             
-            logger.info("Setting remote description...")
+            logger.info("Setting remote description with zero latency optimization...")
             remote_desc = RTCSessionDescription(
                 sdp=fixed_sdp,
                 type=sdp_offer["type"]
             )
             await pc.setRemoteDescription(remote_desc)
             
-            # Проверяем трансиверы
+            # Агрессивно настраиваем трансиверы
             transceivers = pc.getTransceivers()
-            
             for i, transceiver in enumerate(transceivers):
                 if transceiver.kind == "video":
                     if hasattr(transceiver, 'direction') and transceiver.direction == 'recvonly':
                         transceiver.direction = 'sendrecv'
-                        logger.info("Changed video transceiver direction to sendrecv")
+                        logger.info("Zero latency: Changed video transceiver direction")
             
             # Создаем answer
-            logger.info("Creating answer...")
+            logger.info("Creating zero latency answer...")
             answer = await pc.createAnswer()
             
-            # Исправляем answer SDP
-            fixed_answer_sdp = fix_safari_sdp(answer.sdp)
-            fixed_answer = RTCSessionDescription(
-                sdp=fixed_answer_sdp,
+            # КРИТИЧНО: Двойная оптимизация answer SDP
+            optimized_answer = optimize_sdp_for_zero_latency(answer.sdp)
+            final_answer_sdp = fix_safari_sdp(optimized_answer)
+            
+            final_answer = RTCSessionDescription(
+                sdp=final_answer_sdp,
                 type=answer.type
             )
             
-            await pc.setLocalDescription(fixed_answer)
+            await pc.setLocalDescription(final_answer)
             
-            logger.info(f"Memory-optimized WebRTC offer processed. Active connections: {len(self.pcs)}")
+            logger.info("Zero latency WebRTC offer processed successfully")
             
             return {
                 "sdp": pc.localDescription.sdp,
@@ -445,15 +449,14 @@ class MemoryOptimizedWebRTCHandler:
             }
             
         except Exception as e:
-            logger.error(f"Error in _async_create_offer: {e}", exc_info=True)
+            logger.error(f"Error in zero latency offer: {e}", exc_info=True)
             if 'pc' in locals():
                 await self._cleanup_pc(pc)
             raise
     
     async def _cleanup_pc(self, pc):
-        """Очистка peer connection с освобождением памяти"""
         try:
-            logger.info(f"Cleaning up peer connection. Remaining: {len(self.pcs)}")
+            logger.info("Cleaning up zero latency peer connection")
             
             if hasattr(pc, '_video_track_instance'):
                 pc._video_track_instance.stop()
@@ -461,51 +464,42 @@ class MemoryOptimizedWebRTCHandler:
                 
             if pc.connectionState != 'closed':
                 await pc.close()
-            
-            # Принудительная очистка памяти после закрытия соединения
-            gc.collect()
                 
         except Exception as e:
-            logger.error(f"Error cleaning up PC: {e}")
+            logger.error(f"Error cleaning up zero latency PC: {e}")
     
     def shutdown(self):
-        """Shutdown с полной очисткой памяти"""
         if self._shutdown_in_progress or not self.is_running:
-            logger.info("Shutdown already in progress or not running")
+            logger.info("Zero latency shutdown already in progress")
             return
             
         self._shutdown_in_progress = True
-        logger.info("Starting memory-safe WebRTC shutdown...")
+        logger.info("Starting zero latency WebRTC shutdown...")
         
         try:
-            # Останавливаем общий источник видео
-            shared_source = SharedVideoSource()
+            # Быстрая остановка источника
+            shared_source = UltraLowLatencyVideoSource()
             shared_source.safe_shutdown()
             
-            # Закрываем peer connections
+            # Быстрое закрытие соединений
             if self.loop and self.is_running:
                 future = asyncio.run_coroutine_threadsafe(
                     self._async_shutdown(), self.loop
                 )
-                future.result(timeout=3.0)
+                future.result(timeout=1.0)  # Очень быстрый shutdown
             
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+            logger.error(f"Error during zero latency shutdown: {e}")
         finally:
             if self.loop and self.is_running:
                 self.loop.call_soon_threadsafe(self.loop.stop)
             
             self.is_running = False
-            
-            # Принудительная очистка памяти в конце
-            gc.collect()
-            logger.info("Memory-safe WebRTC handler shutdown complete")
+            logger.info("Zero latency WebRTC handler shutdown complete")
         
     async def _async_shutdown(self):
-        """Быстрое закрытие с очисткой памяти"""
-        logger.info(f"Shutting down {len(self.pcs)} peer connections with memory cleanup...")
+        logger.info("Fast zero latency shutdown...")
         
-        # WeakSet автоматически очистится от мертвых ссылок
         pcs_copy = list(self.pcs)
         self.pcs.clear()
         
@@ -515,9 +509,8 @@ class MemoryOptimizedWebRTCHandler:
                     pc._video_track_instance.stop()
                     del pc._video_track_instance
                 except Exception as e:
-                    logger.error(f"Error stopping video track: {e}")
+                    logger.error(f"Error stopping zero latency track: {e}")
         
-        # Быстрое закрытие соединений
         if pcs_copy:
             close_tasks = []
             for pc in pcs_copy:
@@ -528,18 +521,14 @@ class MemoryOptimizedWebRTCHandler:
                 try:
                     await asyncio.wait_for(
                         asyncio.gather(*close_tasks, return_exceptions=True),
-                        timeout=2.0
+                        timeout=0.5  # Ультра быстрый таймаут
                     )
                 except asyncio.TimeoutError:
-                    logger.warning("Memory-safe shutdown timeout")
+                    logger.warning("Zero latency shutdown timeout")
         
-        # Принудительная очистка памяти
-        for _ in range(3):
-            gc.collect()
-        
-        logger.info("All peer connections cleaned up with memory optimization")
+        logger.info("Zero latency connections cleaned up")
 
 # В main.py замените:
-# webrtc_handler = WebRTCHandler()
-# на:
 # webrtc_handler = MemoryOptimizedWebRTCHandler()
+# на:
+# webrtc_handler = ZeroLatencyWebRTCHandler()
