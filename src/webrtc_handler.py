@@ -1,67 +1,83 @@
 import asyncio
 import logging
 import threading
-import time
-import psutil
-import numpy as np
 from aiortc import RTCPeerConnection, MediaStreamTrack, RTCSessionDescription, RTCConfiguration, RTCIceServer
 from aiortc.contrib.media import MediaPlayer
 from av import VideoFrame
 import atexit
+import time
+import gc
+import weakref
+import psutil
+import os
 
 logger = logging.getLogger('webrtc')
 
-class PerformanceMonitor:
+class MemoryManager:
     """
-    Мониторинг производительности для отображения на видео
+    Агрессивное управление памятью для предотвращения утечек
     """
     def __init__(self):
+        self.last_cleanup = time.time()
         self.frame_count = 0
-        self.fps_start_time = time.time()
-        self.current_fps = 0.0
-        self.last_fps_update = 0
+        self.cleanup_interval = 5.0  # Каждые 5 секунд
+        self.force_cleanup_interval = 30.0  # Каждые 30 секунд принудительная очистка
+        self.last_force_cleanup = time.time()
         
-    def update_fps(self):
-        """Обновляет счетчик FPS"""
-        self.frame_count += 1
+    def should_cleanup(self):
+        """Проверяет нужна ли очистка памяти"""
         current_time = time.time()
+        self.frame_count += 1
         
-        # Обновляем FPS каждые 30 кадров или каждые 2 секунды
-        if self.frame_count >= 30 or (current_time - self.last_fps_update) >= 2.0:
-            time_diff = current_time - self.fps_start_time
-            if time_diff > 0:
-                self.current_fps = self.frame_count / time_diff
-            
-            # Сбрасываем счетчики
+        # Обычная очистка каждые 5 секунд или каждые 100 кадров
+        if (current_time - self.last_cleanup > self.cleanup_interval or 
+            self.frame_count > 100):
+            self.last_cleanup = current_time
             self.frame_count = 0
-            self.fps_start_time = current_time
-            self.last_fps_update = current_time
+            return True
             
-    def get_system_info(self):
-        """Получает информацию о системе"""
+        return False
+    
+    def should_force_cleanup(self):
+        """Проверяет нужна ли принудительная очистка"""
+        current_time = time.time()
+        if current_time - self.last_force_cleanup > self.force_cleanup_interval:
+            self.last_force_cleanup = current_time
+            return True
+        return False
+    
+    def cleanup_memory(self):
+        """Обычная очистка памяти"""
         try:
-            cpu_percent = psutil.cpu_percent(interval=None)  # Мгновенное значение
-            memory = psutil.virtual_memory()
-            memory_percent = memory.percent
-            
-            return {
-                'fps': self.current_fps,
-                'cpu': cpu_percent,
-                'memory': memory_percent,
-                'temp': 'N/A'
-            }
+            gc.collect()
+            logger.debug("Memory cleanup completed")
         except Exception as e:
-            logger.error(f"Error getting system info: {e}")
-            return {
-                'fps': self.current_fps,
-                'cpu': 0.0,
-                'memory': 0.0,
-                'temp': 'N/A'
-            }
+            logger.error(f"Error during memory cleanup: {e}")
+    
+    def force_cleanup_memory(self):
+        """Принудительная агрессивная очистка памяти"""
+        try:
+            # Принудительная сборка мусора несколько раз
+            for _ in range(3):
+                gc.collect()
+            
+            # Получаем информацию о памяти
+            process = psutil.Process(os.getpid())
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            
+            logger.info(f"Force cleanup: Memory usage: {memory_mb:.1f} MB")
+            
+            # Если памяти используется больше 400MB - логируем предупреждение
+            if memory_mb > 400:
+                logger.warning(f"High memory usage detected: {memory_mb:.1f} MB")
+                
+        except Exception as e:
+            logger.error(f"Error during force memory cleanup: {e}")
 
 class SharedVideoSource:
     """
-    Общий источник видео для всех клиентов с мониторингом производительности
+    Источник видео с агрессивным управлением памятью
     """
     _instance = None
     _lock = threading.Lock()
@@ -80,43 +96,50 @@ class SharedVideoSource:
             
         self.player = None
         self.track = None
-        self.subscribers = set()
+        self.subscribers = weakref.WeakSet()  # ВАЖНО: Используем WeakSet!
         self._stopped = False
         self._lock = threading.Lock()
         self._shutdown_called = False
-        self.performance_monitor = PerformanceMonitor()
+        self.memory_manager = MemoryManager()
+        self.last_frame = None  # Кэшируем последний кадр
         
-        # Создаем единственный MediaPlayer
+        # КРИТИЧЕСКИЕ настройки для предотвращения утечек памяти
         try:
             camera_options = {
                 'video_size': '640x480',
                 'framerate': '15',
-                'pixel_format': 'yuyv422'
+                'pixel_format': 'yuyv422',
+                'thread_queue_size': '1',     # ВАЖНО: Минимальный размер очереди
+                'buffer_size': '1',           # ВАЖНО: Минимальный буфер
+                'fflags': '+nobuffer+fastseek+flush_packets',  # Агрессивные флаги очистки
+                'avioflags': 'direct',        # Прямой доступ без буферизации
             }
             
             self.player = MediaPlayer('/dev/video0', format='v4l2', options=camera_options)
             
             if self.player.video:
                 self.track = self.player.video
-                logger.info("Shared camera /dev/video0 successfully initialized")
+                logger.info("Camera initialized with memory-optimized settings")
             else:
                 raise Exception("No video track from camera")
                 
         except Exception as e:
-            logger.error(f"Failed to initialize shared camera: {e}")
+            logger.error(f"Failed to initialize camera: {e}")
             try:
-                self.player = MediaPlayer('/dev/video0', format='v4l2')
+                # Fallback с минимальными настройками
+                self.player = MediaPlayer('/dev/video0', format='v4l2', 
+                                        options={'fflags': '+nobuffer', 'buffer_size': '1'})
                 if self.player.video:
                     self.track = self.player.video
-                    logger.warning("Shared camera initialized with basic settings")
+                    logger.warning("Camera initialized with basic memory-safe settings")
                 else:
-                    raise Exception("No video track from basic camera init")
+                    raise Exception("No video track from fallback")
             except Exception as e2:
-                logger.error(f"Shared camera fallback also failed: {e2}")
-                # Последний fallback на тестовый источник
-                self.player = MediaPlayer('testsrc=size=640x480:rate=15', format='lavfi')
+                logger.error(f"Camera fallback failed: {e2}")
+                self.player = MediaPlayer('testsrc=size=640x480:rate=15', format='lavfi',
+                                        options={'fflags': '+nobuffer'})
                 self.track = self.player.video
-                logger.warning("Using shared test source instead of camera")
+                logger.warning("Using test source")
         
         self._initialized = True
         atexit.register(self._emergency_cleanup)
@@ -134,202 +157,73 @@ class SharedVideoSource:
     def unsubscribe(self, video_track):
         """Отписывает видео трек"""
         with self._lock:
-            self.subscribers.discard(video_track)
+            # WeakSet автоматически удаляет мертвые ссылки
             logger.info(f"Video track unsubscribed. Total subscribers: {len(self.subscribers)}")
     
-    def draw_info_overlay(self, img, sys_info, client_count):
-        """Рисует информационную панель на изображении с подписями"""
-        try:
-            # Размеры панели
-            panel_height = 80
-            panel_width = 300
-            
-            # Создаем темную полупрозрачную панель
-            overlay = img.copy()
-            overlay[10:10+panel_height, 10:10+panel_width] = [0, 30, 0]  # Темно-зеленый фон
-            
-            # Смешиваем с оригинальным изображением (эффект прозрачности)
-            alpha = 0.8
-            img[10:10+panel_height, 10:10+panel_width] = (
-                alpha * overlay[10:10+panel_height, 10:10+panel_width] + 
-                (1 - alpha) * img[10:10+panel_height, 10:10+panel_width]
-            ).astype(np.uint8)
-            
-            # Добавляем рамку
-            img[10:12, 10:10+panel_width] = [0, 255, 0]  # Верхняя
-            img[10+panel_height-2:10+panel_height, 10:10+panel_width] = [0, 255, 0]  # Нижняя
-            img[10:10+panel_height, 10:12] = [0, 255, 0]  # Левая
-            img[10:10+panel_height, 10+panel_width-2:10+panel_width] = [0, 255, 0]  # Правая
-            
-            # === ПОДПИСИ ПОЛОСОК ===
-            # FPS подпись (белыми пикселями)
-            self.draw_text(img, "FPS", 15, 18, [255, 255, 255])
-            
-            # CPU подпись
-            self.draw_text(img, "CPU", 15, 33, [255, 255, 255])
-            
-            # MEM подпись  
-            self.draw_text(img, "MEM", 15, 48, [255, 255, 255])
-            
-            # CLIENTS подпись
-            self.draw_text(img, "CLI", 15, 63, [255, 255, 255])
-            
-            # === ПОЛОСКИ С ДАННЫМИ ===
-            # FPS полоска (зеленая = хорошо, красная = плохо)
-            fps_bar_width = int((sys_info['fps'] / 20.0) * 180)  # Немного уменьшили ширину для подписей
-            fps_color = [0, 255, 0] if sys_info['fps'] > 10 else [0, 255, 255] if sys_info['fps'] > 5 else [0, 0, 255]
-            img[20:25, 60:60+min(fps_bar_width, 180)] = fps_color
-            
-            # Рамка для FPS полоски
-            img[19:20, 60:240] = [100, 100, 100]  # Верх
-            img[25:26, 60:240] = [100, 100, 100]  # Низ
-            img[19:26, 59:60] = [100, 100, 100]  # Лево
-            img[19:26, 240:241] = [100, 100, 100]  # Право
-            
-            # Значение FPS
-            fps_text = f"{sys_info['fps']:.1f}"
-            self.draw_text(img, fps_text, 250, 18, [255, 255, 255])
-            
-            # CPU полоска
-            cpu_bar_width = int((sys_info['cpu'] / 100.0) * 180)
-            cpu_color = [0, 255, 0] if sys_info['cpu'] < 50 else [0, 255, 255] if sys_info['cpu'] < 80 else [0, 0, 255]
-            img[35:40, 60:60+min(cpu_bar_width, 180)] = cpu_color
-            
-            # Рамка для CPU полоски
-            img[34:35, 60:240] = [100, 100, 100]
-            img[40:41, 60:240] = [100, 100, 100]
-            img[34:41, 59:60] = [100, 100, 100]
-            img[34:41, 240:241] = [100, 100, 100]
-            
-            # Значение CPU
-            cpu_text = f"{sys_info['cpu']:.0f}%"
-            self.draw_text(img, cpu_text, 250, 33, [255, 255, 255])
-            
-            # Memory полоска
-            mem_bar_width = int((sys_info['memory'] / 100.0) * 180)
-            mem_color = [0, 255, 0] if sys_info['memory'] < 70 else [0, 255, 255] if sys_info['memory'] < 90 else [0, 0, 255]
-            img[50:55, 60:60+min(mem_bar_width, 180)] = mem_color
-            
-            # Рамка для Memory полоски
-            img[49:50, 60:240] = [100, 100, 100]
-            img[55:56, 60:240] = [100, 100, 100]
-            img[49:56, 59:60] = [100, 100, 100]
-            img[49:56, 240:241] = [100, 100, 100]
-            
-            # Значение Memory
-            mem_text = f"{sys_info['memory']:.0f}%"
-            self.draw_text(img, mem_text, 250, 48, [255, 255, 255])
-            
-            # Индикатор клиентов
-            for i in range(min(client_count, 8)):  # Максимум 8 точек
-                x = 60 + i * 20
-                img[65:70, x:x+15] = [0, 255, 0]  # Зеленые точки для каждого клиента
-                
-            # Значение клиентов
-            client_text = str(client_count)
-            self.draw_text(img, client_text, 250, 63, [255, 255, 255])
-                
-        except Exception as e:
-            logger.error(f"Error drawing overlay: {e}")
-            # В случае ошибки просто рисуем простой зеленый прямоугольник
-            img[10:40, 10:150] = [0, 255, 0]
-
-    def draw_text(self, img, text, x, y, color):
-        """Рисует простой пиксельный текст"""
-        try:
-            # Простые 3x5 пиксельных символов
-            char_patterns = {
-                'F': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,0,0]],
-                'P': [[1,1,1],[1,0,1],[1,1,1],[1,0,0],[1,0,0]],
-                'S': [[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
-                'C': [[1,1,1],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
-                'U': [[1,0,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
-                'M': [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
-                'E': [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
-                'L': [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
-                'I': [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
-                '0': [[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
-                '1': [[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
-                '2': [[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]],
-                '3': [[1,1,1],[0,0,1],[1,1,1],[0,0,1],[1,1,1]],
-                '4': [[1,0,1],[1,0,1],[1,1,1],[0,0,1],[0,0,1]],
-                '5': [[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
-                '6': [[1,1,1],[1,0,0],[1,1,1],[1,0,1],[1,1,1]],
-                '7': [[1,1,1],[0,0,1],[0,0,1],[0,0,1],[0,0,1]],
-                '8': [[1,1,1],[1,0,1],[1,1,1],[1,0,1],[1,1,1]],
-                '9': [[1,1,1],[1,0,1],[1,1,1],[0,0,1],[1,1,1]],
-                '.': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,1,0]],
-                '%': [[1,0,1],[0,0,1],[0,1,0],[1,0,0],[1,0,1]],
-                ' ': [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]]
-            }
-            
-            char_x = x
-            for char in text.upper():
-                if char in char_patterns:
-                    pattern = char_patterns[char]
-                    for row_idx, row in enumerate(pattern):
-                        for col_idx, pixel in enumerate(row):
-                            if pixel:
-                                px = char_x + col_idx
-                                py = y + row_idx
-                                if px < img.shape[1] and py < img.shape[0]:
-                                    img[py, px] = color
-                    char_x += 4  # Пробел между символами
-                else:
-                    char_x += 4  # Пробел для неизвестного символа
-                    
-        except Exception as e:
-            logger.error(f"Error drawing text '{text}': {e}")
-    
     async def get_frame(self):
-        """Получает кадр от общего источника с информационной панелью"""
+        """
+        Получение кадров с агрессивным управлением памятью
+        """
         if self._stopped or not self.track:
-            img = np.zeros((480, 640, 3), dtype=np.uint8)
-            img[240:280, 250:390] = [0, 0, 255]
-            frame = VideoFrame.from_ndarray(img, format="bgr24")
-            return frame
+            return self.last_frame
             
         try:
+            # Получаем новый кадр
             frame = await self.track.recv()
             
-            # Обновляем FPS
-            self.performance_monitor.update_fps()
+            # ВАЖНО: Явно освобождаем предыдущий кадр
+            if self.last_frame is not None:
+                del self.last_frame
             
-            # Конвертируем в numpy array для обработки
-            img = frame.to_ndarray(format="bgr24")
+            self.last_frame = frame
             
-            # Получаем информацию о системе
-            sys_info = self.performance_monitor.get_system_info()
+            # Проверяем нужна ли очистка памяти
+            if self.memory_manager.should_cleanup():
+                self.memory_manager.cleanup_memory()
             
-            # Получаем количество клиентов
-            with self._lock:
-                client_count = len(self.subscribers)
+            # Принудительная очистка при необходимости
+            if self.memory_manager.should_force_cleanup():
+                self.memory_manager.force_cleanup_memory()
             
-            # Рисуем информационную панель
-            self.draw_info_overlay(img, sys_info, client_count)
-            
-            # Создаем КОПИЮ кадра для каждого получателя
-            new_frame = VideoFrame.from_ndarray(img.copy(), format="bgr24")
-            new_frame.pts = frame.pts
-            new_frame.time_base = frame.time_base
-            
-            return new_frame
+            return frame
             
         except Exception as e:
             if not self._stopped:
-                logger.error(f"Error getting shared frame: {e}")
-            
-            # В случае ошибки возвращаем черный кадр с ошибкой
-            img = np.zeros((480, 640, 3), dtype=np.uint8)
-            img[240:280, 320:420] = [0, 0, 255]
-            frame = VideoFrame.from_ndarray(img, format="bgr24")
-            return frame
+                logger.error(f"Error getting frame: {e}")
+            return self.last_frame
     
     def _emergency_cleanup(self):
         """Экстренная очистка при завершении программы"""
         if not self._shutdown_called:
             logger.warning("Emergency cleanup of shared video source")
             self._stopped = True
+            self._cleanup_resources()
+    
+    def _cleanup_resources(self):
+        """Очистка всех ресурсов"""
+        try:
+            # Очищаем кэшированный кадр
+            if self.last_frame is not None:
+                del self.last_frame
+                self.last_frame = None
+            
+            # Очищаем track
+            if self.track:
+                self.track = None
+                
+            # Очищаем player - ОСТОРОЖНО!
+            if self.player:
+                try:
+                    # НЕ вызываем stop() - это может вызвать segfault
+                    self.player = None
+                except Exception as e:
+                    logger.error(f"Error cleaning player: {e}")
+            
+            # Принудительная очистка памяти
+            gc.collect()
+            
+        except Exception as e:
+            logger.error(f"Error during resource cleanup: {e}")
     
     def safe_shutdown(self):
         """Безопасная остановка"""
@@ -342,13 +236,12 @@ class SharedVideoSource:
         with self._lock:
             self.subscribers.clear()
         
-        self.track = None
-        logger.info("Shared video source marked for shutdown (MediaPlayer will cleanup automatically)")
+        self._cleanup_resources()
+        logger.info("Shared video source shutdown with memory cleanup")
 
-# Остальные классы остаются без изменений...
-class VideoTransformTrack(MediaStreamTrack):
+class MemoryEfficientVideoTrack(MediaStreamTrack):
     """
-    Видео трек, который получает кадры от общего источника
+    Видео трек с контролем памяти
     """
     kind = "video"
 
@@ -356,42 +249,53 @@ class VideoTransformTrack(MediaStreamTrack):
         super().__init__()
         self._stopped = False
         self.shared_source = SharedVideoSource()
+        self.frame_cache = None
         
         if not self.shared_source.subscribe(self):
             logger.error("Failed to subscribe to shared video source")
         else:
-            logger.info("VideoTransformTrack created and subscribed to shared source")
+            logger.info("MemoryEfficientVideoTrack created")
 
     async def recv(self):
         """
-        Получает кадр от общего источника
+        Получение кадра с освобождением предыдущего
         """
         if self._stopped:
-            img = np.zeros((480, 640, 3), dtype=np.uint8)
-            frame = VideoFrame.from_ndarray(img, format="bgr24")
-            return frame
+            return None
         
-        return await self.shared_source.get_frame()
+        # Освобождаем предыдущий кэшированный кадр
+        if self.frame_cache is not None:
+            del self.frame_cache
+            self.frame_cache = None
+        
+        # Получаем новый кадр
+        frame = await self.shared_source.get_frame()
+        self.frame_cache = frame
+        
+        return frame
 
     def stop(self):
-        """Останавливает трек"""
+        """Останавливает трек с очисткой памяти"""
         if not self._stopped:
             self._stopped = True
+            
+            # Очищаем кэш кадра
+            if self.frame_cache is not None:
+                del self.frame_cache
+                self.frame_cache = None
+                
             if hasattr(self, 'shared_source'):
                 self.shared_source.unsubscribe(self)
-            logger.info("VideoTransformTrack stopped and unsubscribed")
+            
+            logger.info("MemoryEfficientVideoTrack stopped and cleaned")
 
 def fix_safari_sdp(sdp_text):
-    """
-    Исправляет SDP для совместимости с Safari/iOS
-    """
+    """Исправляет SDP для совместимости с Safari/iOS"""
     lines = sdp_text.split('\r\n')
     fixed_lines = []
     
     for line in lines:
-        # Исправляем направления для Safari
         if line.startswith('a=') and ('recvonly' in line or 'sendonly' in line or 'sendrecv' in line or 'inactive' in line):
-            # Safari иногда создает некорректные направления
             if 'recvonly' in line:
                 fixed_lines.append('a=recvonly')
             elif 'sendonly' in line:
@@ -407,20 +311,19 @@ def fix_safari_sdp(sdp_text):
     
     return '\r\n'.join(fixed_lines)
 
-class WebRTCHandler:
+class MemoryOptimizedWebRTCHandler:
     """
-    Класс для обработки WebRTC соединений с поддержкой множественных клиентов
+    WebRTC handler с предотвращением утечек памяти
     """
     
     def __init__(self):
-        self.pcs = set()
+        self.pcs = weakref.WeakSet()  # ВАЖНО: Используем WeakSet!
         self.loop = None
         self.loop_thread = None
         self.is_running = False
         self._shutdown_in_progress = False
         
     def start_loop(self):
-        """Запускает event loop в отдельном потоке"""
         if self.is_running:
             return
             
@@ -428,7 +331,7 @@ class WebRTCHandler:
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
             self.is_running = True
-            logger.info("WebRTC event loop started")
+            logger.info("Memory-optimized WebRTC event loop started")
             try:
                 self.loop.run_forever()
             except Exception as e:
@@ -439,7 +342,6 @@ class WebRTCHandler:
         self.loop_thread = threading.Thread(target=run_loop, daemon=True)
         self.loop_thread.start()
         
-        # Ждем пока loop будет готов
         import time
         timeout = 5.0
         start_time = time.time()
@@ -450,9 +352,6 @@ class WebRTCHandler:
             raise RuntimeError("Failed to start WebRTC event loop")
         
     def create_offer(self, sdp_offer):
-        """
-        Обрабатывает SDP offer от клиента и возвращает answer
-        """
         if self._shutdown_in_progress:
             raise RuntimeError("WebRTC handler is shutting down")
             
@@ -471,26 +370,25 @@ class WebRTCHandler:
         
     async def _async_create_offer(self, sdp_offer):
         """
-        Асинхронная версия создания offer с поддержкой множественных клиентов
+        Создание offer с контролем памяти
         """
         if self._shutdown_in_progress:
             raise RuntimeError("Shutdown in progress")
             
         try:
-            # Увеличиваем лимит для множественных клиентов
-            if len(self.pcs) > 10:
-                logger.warning("Too many peer connections, rejecting new connection")
+            # Строгий лимит соединений для экономии памяти
+            if len(self.pcs) > 2:
+                logger.warning("Too many peer connections for memory optimization")
                 raise RuntimeError("Too many connections")
-                
+            
             # Конфигурация
             ice_servers = [RTCIceServer(urls=['stun:stun.l.google.com:19302'])]
             configuration = RTCConfiguration(iceServers=ice_servers)
             pc = RTCPeerConnection(configuration=configuration)
             self.pcs.add(pc)
             
-            logger.info(f"New peer connection created. Total connections: {len(self.pcs)}")
+            logger.info(f"New memory-optimized peer connection. Total: {len(self.pcs)}")
             
-            # Добавляем обработчик для отключения
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(f"Connection state is {pc.connectionState}")
@@ -501,13 +399,13 @@ class WebRTCHandler:
             def on_track(track):
                 logger.info(f"Track received: {track.kind}")
             
-            # Создаем отдельный видео трек для каждого клиента
-            video_track = VideoTransformTrack()
+            # Создаем memory-efficient видео трек
+            video_track = MemoryEfficientVideoTrack()
             pc._video_track_instance = video_track
             pc.addTrack(video_track)
-            logger.info("Video track added for new client")
+            logger.info("Memory-efficient video track added")
             
-            # Исправляем SDP и устанавливаем remote description
+            # Исправляем SDP
             fixed_sdp = fix_safari_sdp(sdp_offer["sdp"])
             
             logger.info("Setting remote description...")
@@ -519,13 +417,9 @@ class WebRTCHandler:
             
             # Проверяем трансиверы
             transceivers = pc.getTransceivers()
-            logger.info(f"Found {len(transceivers)} transceivers after setRemoteDescription")
             
             for i, transceiver in enumerate(transceivers):
-                logger.info(f"Transceiver {i}: kind={transceiver.kind}, direction={transceiver.direction}")
-                
                 if transceiver.kind == "video":
-                    logger.info(f"Video transceiver direction: {transceiver.direction}")
                     if hasattr(transceiver, 'direction') and transceiver.direction == 'recvonly':
                         transceiver.direction = 'sendrecv'
                         logger.info("Changed video transceiver direction to sendrecv")
@@ -543,7 +437,7 @@ class WebRTCHandler:
             
             await pc.setLocalDescription(fixed_answer)
             
-            logger.info(f"WebRTC offer processed successfully. Active connections: {len(self.pcs)}")
+            logger.info(f"Memory-optimized WebRTC offer processed. Active connections: {len(self.pcs)}")
             
             return {
                 "sdp": pc.localDescription.sdp,
@@ -557,70 +451,73 @@ class WebRTCHandler:
             raise
     
     async def _cleanup_pc(self, pc):
-        """Безопасная очистка peer connection"""
+        """Очистка peer connection с освобождением памяти"""
         try:
-            self.pcs.discard(pc)
-            logger.info(f"Peer connection removed. Remaining connections: {len(self.pcs)}")
+            logger.info(f"Cleaning up peer connection. Remaining: {len(self.pcs)}")
             
             if hasattr(pc, '_video_track_instance'):
                 pc._video_track_instance.stop()
+                del pc._video_track_instance
                 
             if pc.connectionState != 'closed':
                 await pc.close()
+            
+            # Принудительная очистка памяти после закрытия соединения
+            gc.collect()
                 
         except Exception as e:
             logger.error(f"Error cleaning up PC: {e}")
     
     def shutdown(self):
-        """Закрывает все соединения и общий источник видео"""
+        """Shutdown с полной очисткой памяти"""
         if self._shutdown_in_progress or not self.is_running:
             logger.info("Shutdown already in progress or not running")
             return
             
         self._shutdown_in_progress = True
-        logger.info("Starting WebRTC shutdown...")
+        logger.info("Starting memory-safe WebRTC shutdown...")
         
         try:
-            # Сначала останавливаем общий источник видео - ИСПРАВЛЕНО
+            # Останавливаем общий источник видео
             shared_source = SharedVideoSource()
-            shared_source.safe_shutdown()  # Используем safe_shutdown вместо shutdown
+            shared_source.safe_shutdown()
             
-            # Затем закрываем все peer connections
-            future = asyncio.run_coroutine_threadsafe(
-                self._async_shutdown(), self.loop
-            )
-            future.result(timeout=5.0)  # Увеличиваем таймаут
+            # Закрываем peer connections
+            if self.loop and self.is_running:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._async_shutdown(), self.loop
+                )
+                future.result(timeout=3.0)
             
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
         finally:
-            # Принудительно останавливаем event loop
             if self.loop and self.is_running:
                 self.loop.call_soon_threadsafe(self.loop.stop)
             
             self.is_running = False
-            logger.info("WebRTC handler shutdown complete")
+            
+            # Принудительная очистка памяти в конце
+            gc.collect()
+            logger.info("Memory-safe WebRTC handler shutdown complete")
         
     async def _async_shutdown(self):
-        """Асинхронная версия shutdown"""
-        logger.info(f"Shutting down {len(self.pcs)} peer connections...")
+        """Быстрое закрытие с очисткой памяти"""
+        logger.info(f"Shutting down {len(self.pcs)} peer connections with memory cleanup...")
         
-        # Создаем копию множества для безопасной итерации
+        # WeakSet автоматически очистится от мертвых ссылок
         pcs_copy = list(self.pcs)
         self.pcs.clear()
         
-        # Останавливаем все видео треки
         for pc in pcs_copy:
             if hasattr(pc, '_video_track_instance'):
                 try:
                     pc._video_track_instance.stop()
+                    del pc._video_track_instance
                 except Exception as e:
                     logger.error(f"Error stopping video track: {e}")
         
-        # Даем время на остановку треков
-        await asyncio.sleep(0.5)
-                    
-        # Закрываем все peer connections параллельно
+        # Быстрое закрытие соединений
         if pcs_copy:
             close_tasks = []
             for pc in pcs_copy:
@@ -631,9 +528,18 @@ class WebRTCHandler:
                 try:
                     await asyncio.wait_for(
                         asyncio.gather(*close_tasks, return_exceptions=True),
-                        timeout=3.0
+                        timeout=2.0
                     )
                 except asyncio.TimeoutError:
-                    logger.warning("Timeout waiting for peer connections to close")
+                    logger.warning("Memory-safe shutdown timeout")
         
-        logger.info("All peer connections cleaned up")
+        # Принудительная очистка памяти
+        for _ in range(3):
+            gc.collect()
+        
+        logger.info("All peer connections cleaned up with memory optimization")
+
+# В main.py замените:
+# webrtc_handler = WebRTCHandler()
+# на:
+# webrtc_handler = MemoryOptimizedWebRTCHandler()

@@ -15,7 +15,7 @@ from qik import MotorController
 from QikErrorChecker import QikErrorChecker
 import utils
 from web_commands import WebCommands
-from webrtc_handler import WebRTCHandler
+from webrtc_handler import MemoryOptimizedWebRTCHandler
 
 dead_zone = 10
 timeout = 0.1
@@ -40,7 +40,7 @@ except ImportError as e:
 pad = dualshock4.DualShock(dead_zone)
 motor_control = MotorController()
 web_commands = WebCommands()
-webrtc_handler = WebRTCHandler()
+webrtc_handler = MemoryOptimizedWebRTCHandler()
 
 # Создаем executor для asyncio задач
 executor = ThreadPoolExecutor(max_workers=4)
