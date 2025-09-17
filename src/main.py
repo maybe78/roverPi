@@ -125,8 +125,8 @@ if __name__ == '__main__':
         
         # Запускаем веб-сервер в основном потоке
         logger.info("Запуск веб-сервера на http://0.0.0.0:5000")
-        socketio.run(app, host='0.0.0.0', port=5000)
-
+        socketio.run(app, host='0.0.0.0', port=5000, ssl_context=('certs/cert.pem', 'certs/key.pem'), allow_unsafe_werkzeug=True)
+        #socketio.run(app, host='0.0.0.0', port=5000)
     except (KeyboardInterrupt, SystemExit):
         logger.info("Получен сигнал завершения. Начинаем остановку...")
     finally:

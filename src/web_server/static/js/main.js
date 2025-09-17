@@ -102,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            const response = await fetch(`http://${ROVER_IP}:8080`, {
+            const response = await fetch(`https://192.168.0.38:8443`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/sdp' },
                 body: offer.sdp

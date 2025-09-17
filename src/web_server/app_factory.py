@@ -1,13 +1,13 @@
 from flask import Flask
 from flask_socketio import SocketIO
+from webrtc_audio_streamer import WebRTCAudioReceiver  # <-- Исправлен импорт
+
 
 def create_app(web_commands, audio_player, config=None):
     """
     Фабрика для создания Flask приложения с необходимыми компонентами.
     """
     app = Flask(__name__)
-                # template_folder='../templates',
-                # static_folder='../static')
     
     app.config['SECRET_KEY'] = config.get('secret_key', 'a_very_secret_key_for_rover') if config else 'a_very_secret_key_for_rover'
     
@@ -19,9 +19,13 @@ def create_app(web_commands, audio_player, config=None):
         socketio_logger=False,
     )
     
+    # Создаем WebRTC приемник для микрофона
+    webrtc_receiver = WebRTCAudioReceiver()  # <-- Исправлено название
+    
     # Передаем зависимости в контекст приложения
     app.web_commands = web_commands
     app.audio_player = audio_player
+    app.webrtc_receiver = webrtc_receiver  # <-- Исправлено название
     app.socketio = socketio
     
     # Регистрируем blueprints
@@ -35,6 +39,7 @@ def create_app(web_commands, audio_player, config=None):
     register_socketio_handlers(socketio, web_commands)
     
     return app, socketio
+
 
 def register_socketio_handlers(socketio, web_commands):
     """
