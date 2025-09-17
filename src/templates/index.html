@@ -6,95 +6,95 @@
   <title>RoverPi Control</title>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
   <style>
-body {
-  font-family: 'Press Start 2P', cursive;
-  background-color: #0f192a;
-  color: #bbbbbb;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  min-height: 100vh;
-  user-select: none;
-}
+    body {
+      font-family: 'Press Start 2P', cursive;
+      background-color: #0f192a;
+      color: #bbbbbb;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      user-select: none;
+    }
 
-h1 {
-  font-size: 2.5rem;
-  color: #0055ff;
-  margin: 30px 0 20px;
-  text-align: center;
-  width: 100%;
-  text-shadow: 1px 1px #001f66;
-}
+    h1 {
+      font-size: 2.5rem;
+      color: #0055ff;
+      margin: 30px 0 20px;
+      text-align: center;
+      width: 100%;
+      text-shadow: 1px 1px #001f66;
+    }
 
-#video-container {
-  position: relative;
-  margin-top: 10px;
-  max-width: 90vw;
-}
+    #video-container {
+      position: relative;
+      margin-top: 10px;
+      max-width: 90vw;
+    }
 
-#webrtc-video {
-  background-color: #333844;
-  border: 5px solid #444444;
-  border-radius: 16px;
-  width: 100%;
-  height: auto;
-  display: block;
-  box-shadow: 0 0 15px #000a1a;
-}
+    #webrtc-video {
+      background-color: #333844;
+      border: 5px solid #444444;
+      border-radius: 16px;
+      width: 100%;
+      height: auto;
+      display: block;
+      box-shadow: 0 0 15px #000a1a;
+    }
 
-#connection-status {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  font-size: 12px;
-  color: white;
-  background-color: #ff4444;
-}
+    #connection-status {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      color: white;
+      background-color: #ff4444;
+    }
 
-#connection-status.connected {
-  background-color: #44ff44;
-  color: black;
-}
+    #connection-status.connected {
+      background-color: #44ff44;
+      color: black;
+    }
 
-#joystickDiv {
-  width: 200px;
-  height: 200px;
-  background-color: #222533;
-  border-radius: 50%;
-  border: 5px solid #0055ff;
-  box-shadow: 0 0 12px #0055ff;
-  margin-top: 30px;
-}
+    #joystickDiv {
+      width: 200px;
+      height: 200px;
+      background-color: #222533;
+      border-radius: 50%;
+      border: 5px solid #0055ff;
+      box-shadow: 0 0 12px #0055ff;
+      margin-top: 30px;
+    }
 
-.controls {
-  margin-top: 20px;
-  display: flex;
-  gap: 10px;
-}
+    .controls {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+    }
 
-button {
-  padding: 10px 20px;
-  background-color: #0055ff;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 12px;
-}
+    button {
+      padding: 10px 20px;
+      background-color: #0055ff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+    }
 
-button:hover {
-  background-color: #0044cc;
-}
+    button:hover {
+      background-color: #0044cc;
+    }
 
-button:disabled {
-  background-color: #666;
-  cursor: not-allowed;
-}
+    button:disabled {
+      background-color: #666;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -112,8 +112,16 @@ button:disabled {
 
   <div id="joystickDiv"></div>
 
+  <div class="controls" id="audio-controls">
+    <button id="playSound1">Siren</button>
+    <button id="playSound2">Sound</button>
+    <button id="startMic">Mic</button>
+    <button id="stopAllAudio">Stop</button>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/socket.io-client/dist/socket.io.js"></script>
   <script src="/static/js/joystick.js"></script>
   <script src="/static/js/main.js"></script>
+  <script src="/static/js/audio.js"></script>
 </body>
 </html>

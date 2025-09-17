@@ -12,6 +12,7 @@ from qik import MotorController
 from QikErrorChecker import QikErrorChecker
 import utils
 from web_commands import WebCommands
+from audio_player import AudioPlayer
 
 # --- НАСТРОЙКИ ---
 dead_zone = 10
@@ -36,6 +37,7 @@ except Exception as e:
 
 motor_control = MotorController()
 web_commands = WebCommands()
+audio_player = AudioPlayer()
 
 # --- ВЕБ-СЕРВЕР ---
 app = Flask(__name__)
@@ -164,6 +166,7 @@ def cleanup():
 if __name__ == '__main__':
     check_motor_controller()
     motor_thread = None
+    audio_player.play("media/police.mp3")
     try:
         # Создаем и запускаем поток для управления моторами
         motor_thread = Thread(target=motor_control_loop, daemon=True, name="MotorControlThread")

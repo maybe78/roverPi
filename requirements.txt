@@ -4,3 +4,4 @@ pyudev
 opencv-python-headless
 flask
 flask-socketio
+pygame
