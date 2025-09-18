@@ -1,7 +1,6 @@
 from flask import Flask
 from flask_socketio import SocketIO
-from webrtc_audio_streamer import WebRTCAudioReceiver  # <-- Исправлен импорт
-
+import pygame
 
 def create_app(web_commands, audio_player, config=None):
     """
@@ -18,14 +17,10 @@ def create_app(web_commands, audio_player, config=None):
         engineio_logger=False,
         socketio_logger=False,
     )
-    
-    # Создаем WebRTC приемник для микрофона
-    webrtc_receiver = WebRTCAudioReceiver()  # <-- Исправлено название
-    
+
     # Передаем зависимости в контекст приложения
     app.web_commands = web_commands
     app.audio_player = audio_player
-    app.webrtc_receiver = webrtc_receiver  # <-- Исправлено название
     app.socketio = socketio
     
     # Регистрируем blueprints
@@ -44,10 +39,13 @@ def create_app(web_commands, audio_player, config=None):
 def register_socketio_handlers(socketio, web_commands):
     """
     Регистрирует обработчики SocketIO событий.
-    Это сохраняет вашу текущую логику управления моторами.
     """
     import logging
     from threading import Lock
+    import base64
+    import tempfile
+    import subprocess
+    import os
     
     logger = logging.getLogger('rover')
     thread_count_lock = Lock()
@@ -55,9 +53,6 @@ def register_socketio_handlers(socketio, web_commands):
     
     @socketio.on('control')
     def handle_control(data):
-        """
-        ВАЖНО: Сохраняем точно вашу логику управления моторами!
-        """
         nonlocal active_threads
         with thread_count_lock:
             if active_threads > 20:
@@ -72,9 +67,8 @@ def register_socketio_handlers(socketio, web_commands):
             scaled_x = int(lx * 127)
             scaled_y = int(ly * 127)
 
-            # Импортируем utils здесь, чтобы избежать циклических импортов
             import utils
-            ls, rs = utils.joystick_to_diff_control(scaled_x, scaled_y, 10)  # dead_zone = 10
+            ls, rs = utils.joystick_to_diff_control(scaled_x, scaled_y, 10)
             web_commands.set_speed(ls, rs)
             logger.debug(f"Команда с веба: L={ls}, R={rs}")
 
@@ -86,5 +80,84 @@ def register_socketio_handlers(socketio, web_commands):
 
     @socketio.on('connect')
     def handle_connect():
-        """Обработчик подключения нового клиента."""
         logger.info("Клиент подключился к веб-интерфейсу управления.")
+    
+    # обработчики для WebSocket аудио
+    @socketio.on('start_microphone')
+    def handle_start_microphone():
+        """Начинает прослушивание аудио с микрофона."""
+        logger.info("Клиент начал передачу аудио с микрофона через WebSocket")
+        socketio.emit('microphone_status', {'status': 'started'})
+    
+    @socketio.on('audio_data')
+    def handle_audio_data(data):
+        """Правильная обработка разных аудио форматов."""
+        try:
+            audio_data = base64.b64decode(data['audio'])
+            data_size = len(audio_data)
+            
+            logger.debug(f"Получены аудио данные: {data_size} байт")
+            
+            # Определяем формат по заголовку
+            if audio_data[:4] == b'OggS':
+                suffix = '.ogg'
+            elif audio_data[:4] == b'RIFF':
+                suffix = '.wav'  
+            elif audio_data[:4] == b'\x1a\x45\xdf\xa3':
+                suffix = '.webm'
+            else:
+                suffix = '.webm'  # По умолчанию
+                
+            logger.debug(f"Определен формат: {suffix}")
+            
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as input_file, \
+                tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as output_file:
+                
+                input_file.write(audio_data)
+                input_file.flush()
+                
+                try:
+                    # Конвертируем в WAV для надежного воспроизведения
+                    result = subprocess.run([
+                        'ffmpeg', '-hide_banner', '-loglevel', 'error',
+                        '-i', input_file.name,
+                        '-f', 'wav',
+                        '-acodec', 'pcm_s16le',  # 16-bit PCM
+                        '-ar', '22050',          # Понизим частоту для скорости
+                        '-ac', '1',              # Моно
+                        '-y', output_file.name
+                    ], capture_output=True, timeout=3)
+                    
+                    if result.returncode == 0:
+                        # Воспроизводим конвертированный WAV
+                        subprocess.run(['aplay', '-q', output_file.name], 
+                                    capture_output=True, timeout=2)
+                        logger.debug(f"Успешно воспроизведен {suffix} -> WAV")
+                    else:
+                        logger.debug(f"ffmpeg ошибка: {result.stderr.decode()}")
+                        
+                except subprocess.TimeoutExpired:
+                    logger.debug("Timeout при обработке аудио")
+                except Exception as e:
+                    logger.debug(f"Ошибка: {e}")
+                finally:
+                    # Удаляем временные файлы
+                    try:
+                        os.unlink(input_file.name)
+                        os.unlink(output_file.name)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"Критическая ошибка аудио: {e}")
+
+    @socketio.on('stop_microphone')
+    def handle_stop_microphone():
+        """Останавливает прослушивание аудио."""
+        logger.info("Клиент остановил передачу аудио с микрофона")
+        # Остановим все pygame воспроизведение
+        try:
+            pygame.mixer.music.stop()
+        except:
+            pass
+        socketio.emit('microphone_status', {'status': 'stopped'})

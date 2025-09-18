@@ -6,15 +6,30 @@ class AudioController {
         this.isPlaying = false;
         this.currentSound = null;
 
-        // Состояние WebRTC микрофона
+        // Состояние WebSocket микрофона (заменили WebRTC)
         this.isMicStreaming = false;
-        this.webrtcConnection = null;
+        this.mediaRecorder = null;
         this.localStream = null;
 
         // Настройки
         this.baseUrl = '/audio';
         
+        // Получаем SocketIO соединение
+        this.socket = io(); // ← Добавили это
+        
         this.initializeButtons();
+
+        // Обработчики SocketIO для микрофона
+        this.socket.on('microphone_status', (data) => {
+            console.log('Статус микрофона:', data.status);
+            if (data.status === 'started') {
+                this.isMicStreaming = true;
+            } else if (data.status === 'stopped') {
+                this.isMicStreaming = false;
+            }
+            this.updateButtonStates();
+        });
+
         console.log('AudioController инициализирован');
     }
 
@@ -120,81 +135,113 @@ class AudioController {
     }
 
     async startMicrophoneStream() {
-        try {
-            console.log('Запрос доступа к микрофону...');
+    try {
+        console.log('Запрос доступа к микрофону...');
+        
+        // Запрашиваем доступ к микрофону
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                sampleRate: 44100
+            },
+            video: false
+        });
+
+        console.log('Доступ к микрофону получен');
+
+        // ОПРЕДЕЛЯЕМ ПОДДЕРЖИВАЕМЫЙ ФОРМАТ
+        let mimeType = 'audio/wav';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'audio/webm;codecs=pcm';  // WebM с PCM
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'audio/ogg;codecs=opus';  // OGG Opus
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = 'audio/webm;codecs=opus';  // Fallback
+                }
+            }
+        }
+
+        console.log('Поддерживаемые форматы:');
+        ['audio/wav', 'audio/webm', 'audio/webm;codecs=opus', 'audio/webm;codecs=pcm', 'audio/ogg;codecs=opus'].forEach(type => {
+            console.log(type + ':', MediaRecorder.isTypeSupported(type));
+        });
+
+        console.log('Используемый MIME тип:', mimeType);
+
+        // СОЗДАЕМ MediaRecorder ТОЛЬКО ОДИН РАЗ с поддерживаемым форматом
+        this.mediaRecorder = new MediaRecorder(this.localStream, {
+            mimeType: mimeType,
+            audioBitsPerSecond: 64000  // Уменьшенный битрейт
+        });
+
+        // Обработчик получения аудио данных
+        this.mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                this.sendAudioChunk(event.data);
+            }
+        };
+
+        this.mediaRecorder.onstop = () => {
+            console.log('MediaRecorder остановлен');
+        };
+
+        // Уведомляем сервер о начале передачи
+        this.socket.emit('start_microphone');
+
+        // Начинаем запись (отправляем чанки каждую секунду)
+        this.mediaRecorder.start(1000);
+        
+        this.isMicStreaming = true;
+        this.updateButtonStates();
+        console.log('Микрофон транслируется через WebSocket');
+
+    } catch (error) {
+        console.error('Ошибка запуска микрофона:', error);
+        this.showError('Ошибка доступа к микрофону');
+        await this.stopMicrophoneStream();
+    }
+}
+
+
+        sendAudioChunk(audioBlob) {
+            // Самый простой способ - через FileReader с DataURL
+            const reader = new FileReader();
             
-            // Запрашиваем доступ к микрофону
-            this.localStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    sampleRate: 48000
-                },
-                video: false
-            });
-
-            console.log('Доступ к микрофону получен');
-
-            // Создаем WebRTC соединение
-            this.webrtcConnection = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-            });
-
-            // Добавляем аудио-трек в соединение
-            const audioTrack = this.localStream.getAudioTracks()[0];
-            this.webrtcConnection.addTrack(audioTrack, this.localStream);
-
-            this.webrtcConnection.onconnectionstatechange = () => {
-                console.log('WebRTC состояние:', this.webrtcConnection.connectionState);
-                if (this.webrtcConnection.connectionState === 'connected') {
-                    this.isMicStreaming = true;
-                    this.updateButtonStates();
-                    console.log('Микрофон транслируется на Raspberry Pi');
-                } else if (['disconnected', 'failed', 'closed'].includes(this.webrtcConnection.connectionState)) {
-                    this.isMicStreaming = false;
-                    this.updateButtonStates();
+            reader.onload = function() {
+                try {
+                    // Получаем data URL и извлекаем base64 часть
+                    const dataUrl = this.result;
+                    const base64Audio = dataUrl.substring(dataUrl.indexOf(',') + 1);
+                    
+                    window.audioController.socket.emit('audio_data', {
+                        audio: base64Audio,
+                        size: audioBlob.size
+                    });
+                    
+                    console.debug(`Отправлен аудио чанк: ${audioBlob.size} байт`);
+                } catch (error) {
+                    console.error('Ошибка отправки аудио чанка:', error);
                 }
             };
-
-            // Получаем offer от сервера
-            const offerResponse = await this.sendAudioCommand('/webrtc/microphone-offer');
-
-            if (offerResponse.status !== 'success') {
-                throw new Error(offerResponse.message);
-            }
-
-            // Устанавливаем remote description
-            await this.webrtcConnection.setRemoteDescription({
-                type: offerResponse.type,
-                sdp: offerResponse.sdp
-            });
-
-            // Создаем answer
-            const answer = await this.webrtcConnection.createAnswer();
-            await this.webrtcConnection.setLocalDescription(answer);
-
-            // Отправляем answer на сервер
-            const answerResponse = await this.sendAudioCommand('/webrtc/microphone-answer', {
-                connection_id: offerResponse.connection_id,
-                sdp: answer.sdp,
-                type: answer.type
-            });
-
-            if (answerResponse.status !== 'success') {
-                throw new Error(answerResponse.message);
-            }
-
-            console.log('WebRTC соединение для микрофона установлено');
-
-        } catch (error) {
-            console.error('Ошибка запуска микрофона:', error);
-            this.showError('Ошибка доступа к микрофону');
-            await this.stopMicrophoneStream();
+            
+            reader.onerror = function() {
+                console.error('Ошибка чтения аудио blob');
+            };
+            
+            // Читаем как Data URL - это безопаснее всего
+            reader.readAsDataURL(audioBlob);
         }
-    }
+
+
 
     async stopMicrophoneStream() {
         console.log('Остановка трансляции микрофона');
+
+        // Останавливаем запись
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            this.mediaRecorder.stop();
+        }
 
         // Останавливаем локальный поток
         if (this.localStream) {
@@ -202,20 +249,11 @@ class AudioController {
             this.localStream = null;
         }
 
-        // Закрываем WebRTC соединение
-        if (this.webrtcConnection) {
-            this.webrtcConnection.close();
-            this.webrtcConnection = null;
-        }
-
         // Уведомляем сервер
-        try {
-            await this.sendAudioCommand('/webrtc/microphone-stop');
-        } catch (error) {
-            console.error('Ошибка уведомления сервера об остановке микрофона:', error);
-        }
+        this.socket.emit('stop_microphone'); // ← Используем this.socket
 
         this.isMicStreaming = false;
+        this.mediaRecorder = null;
         this.updateButtonStates();
         console.log('Трансляция микрофона остановлена');
     }
@@ -254,12 +292,9 @@ class AudioController {
             }
         }
 
-        // Показываем состояние микрофона
+        // Показываем состояние микрофона ТОЛЬКО ЦВЕТОМ (без смены текста)
         if (this.isMicStreaming) {
             this.startMicBtn.classList.add('recording');
-            this.startMicBtn.textContent = 'Стрим идет...';
-        } else {
-            this.startMicBtn.textContent = 'Микрофон';
         }
     }
 
