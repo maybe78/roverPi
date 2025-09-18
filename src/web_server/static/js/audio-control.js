@@ -6,30 +6,10 @@ class AudioController {
         this.isPlaying = false;
         this.currentSound = null;
 
-        // Состояние WebSocket микрофона (заменили WebRTC)
-        this.isMicStreaming = false;
-        this.mediaRecorder = null;
-        this.localStream = null;
-
         // Настройки
         this.baseUrl = '/audio';
         
-        // Получаем SocketIO соединение
-        this.socket = io(); // ← Добавили это
-        
         this.initializeButtons();
-
-        // Обработчики SocketIO для микрофона
-        this.socket.on('microphone_status', (data) => {
-            console.log('Статус микрофона:', data.status);
-            if (data.status === 'started') {
-                this.isMicStreaming = true;
-            } else if (data.status === 'stopped') {
-                this.isMicStreaming = false;
-            }
-            this.updateButtonStates();
-        });
-
         console.log('AudioController инициализирован');
     }
 
@@ -37,19 +17,49 @@ class AudioController {
         // Получаем ссылки на кнопки
         this.playSound1Btn = document.getElementById('playSound1');
         this.playSound2Btn = document.getElementById('playSound2');
-        this.startMicBtn = document.getElementById('startMic');
         this.stopAllBtn = document.getElementById('stopAll');
+        this.ttsInput = document.getElementById('ttsInput');
+        this.speakBtn = document.getElementById('speakBtn');
 
-        // Проверяем, что кнопки найдены
-        if (!this.playSound1Btn || !this.playSound2Btn || !this.startMicBtn || !this.stopAllBtn) {
+        console.log('TTS элементы:', this.ttsInput, this.speakBtn);
+        console.log('ttsInput найден:', !!this.ttsInput);
+        console.log('speakBtn найден:', !!this.speakBtn);
+
+        // Проверяем, что основные кнопки найдены
+        if (!this.playSound1Btn || !this.playSound2Btn || !this.stopAllBtn) {
             console.error('Не все аудио-кнопки найдены в DOM!');
             return;
         }
 
+        // TTS обработчики
+        if (this.speakBtn && this.ttsInput) {
+            console.log('✅ Привязываем TTS обработчики');
+            
+            this.speakBtn.addEventListener('click', () => {
+                const text = this.ttsInput.value;
+                console.log('🔊 TTS кнопка нажата, текст:', text);
+                if (text.trim()) {
+                    this.speakText(text);
+                    this.ttsInput.value = ''; // Очищаем поле
+                } else {
+                    console.log('❌ Текст пустой');
+                }
+            });
+            
+            // Enter для озвучивания
+            this.ttsInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    console.log('⌨️ Enter нажат в TTS поле');
+                    this.speakBtn.click();
+                }
+            });
+        } else {
+            console.error('❌ TTS элементы не найдены в DOM!');
+        }
+        
         // Привязываем обработчики событий
         this.playSound1Btn.addEventListener('click', () => this.playSound('sound1'));
         this.playSound2Btn.addEventListener('click', () => this.playSound('sound2'));
-        this.startMicBtn.addEventListener('click', () => this.toggleMicrophone());
         this.stopAllBtn.addEventListener('click', () => this.stopAll());
 
         console.log('Обработчики событий аудиокнопок привязаны');
@@ -85,7 +95,7 @@ class AudioController {
     async playSound(soundName) {
         console.log(`Воспроизведение MP3 на Raspberry Pi: ${soundName}`);
         
-        // Останавливаем текущие MP3, но не WebRTC микрофон
+        // Останавливаем текущие MP3
         if (this.isPlaying) {
             await this.stopLocalPlayback();
         }
@@ -124,138 +134,30 @@ class AudioController {
         }
     }
 
-    // --- WebRTC микрофон ---
+    // --- Text-to-Speech ---
 
-    async toggleMicrophone() {
-        if (this.isMicStreaming) {
-            await this.stopMicrophoneStream();
-        } else {
-            await this.startMicrophoneStream();
+    async speakText(text) {
+        if (!text || !text.trim()) {
+            console.error('Нельзя озвучить пустой текст');
+            return;
         }
-    }
-
-    async startMicrophoneStream() {
-    try {
-        console.log('Запрос доступа к микрофону...');
         
-        // Запрашиваем доступ к микрофону
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                sampleRate: 44100
-            },
-            video: false
-        });
-
-        console.log('Доступ к микрофону получен');
-
-        // ОПРЕДЕЛЯЕМ ПОДДЕРЖИВАЕМЫЙ ФОРМАТ
-        let mimeType = 'audio/wav';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'audio/webm;codecs=pcm';  // WebM с PCM
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                mimeType = 'audio/ogg;codecs=opus';  // OGG Opus
-                if (!MediaRecorder.isTypeSupported(mimeType)) {
-                    mimeType = 'audio/webm;codecs=opus';  // Fallback
-                }
+        try {
+            console.log(`Озвучиваем текст: "${text}"`);
+            
+            const result = await this.sendAudioCommand('/speak', { text: text.trim() });
+            
+            if (result && result.status === 'success') {
+                console.log('TTS запущен на Raspberry Pi');
+                // Можно добавить визуальную индикацию
+            } else {
+                console.error('Ошибка TTS:', result.message);
+                this.showError('Ошибка озвучивания');
             }
+        } catch (error) {
+            console.error('Исключение TTS:', error);
+            this.showError('Ошибка озвучивания');
         }
-
-        console.log('Поддерживаемые форматы:');
-        ['audio/wav', 'audio/webm', 'audio/webm;codecs=opus', 'audio/webm;codecs=pcm', 'audio/ogg;codecs=opus'].forEach(type => {
-            console.log(type + ':', MediaRecorder.isTypeSupported(type));
-        });
-
-        console.log('Используемый MIME тип:', mimeType);
-
-        // СОЗДАЕМ MediaRecorder ТОЛЬКО ОДИН РАЗ с поддерживаемым форматом
-        this.mediaRecorder = new MediaRecorder(this.localStream, {
-            mimeType: mimeType,
-            audioBitsPerSecond: 64000  // Уменьшенный битрейт
-        });
-
-        // Обработчик получения аудио данных
-        this.mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                this.sendAudioChunk(event.data);
-            }
-        };
-
-        this.mediaRecorder.onstop = () => {
-            console.log('MediaRecorder остановлен');
-        };
-
-        // Уведомляем сервер о начале передачи
-        this.socket.emit('start_microphone');
-
-        // Начинаем запись (отправляем чанки каждую секунду)
-        this.mediaRecorder.start(1000);
-        
-        this.isMicStreaming = true;
-        this.updateButtonStates();
-        console.log('Микрофон транслируется через WebSocket');
-
-    } catch (error) {
-        console.error('Ошибка запуска микрофона:', error);
-        this.showError('Ошибка доступа к микрофону');
-        await this.stopMicrophoneStream();
-    }
-}
-
-
-        sendAudioChunk(audioBlob) {
-            // Самый простой способ - через FileReader с DataURL
-            const reader = new FileReader();
-            
-            reader.onload = function() {
-                try {
-                    // Получаем data URL и извлекаем base64 часть
-                    const dataUrl = this.result;
-                    const base64Audio = dataUrl.substring(dataUrl.indexOf(',') + 1);
-                    
-                    window.audioController.socket.emit('audio_data', {
-                        audio: base64Audio,
-                        size: audioBlob.size
-                    });
-                    
-                    console.debug(`Отправлен аудио чанк: ${audioBlob.size} байт`);
-                } catch (error) {
-                    console.error('Ошибка отправки аудио чанка:', error);
-                }
-            };
-            
-            reader.onerror = function() {
-                console.error('Ошибка чтения аудио blob');
-            };
-            
-            // Читаем как Data URL - это безопаснее всего
-            reader.readAsDataURL(audioBlob);
-        }
-
-
-
-    async stopMicrophoneStream() {
-        console.log('Остановка трансляции микрофона');
-
-        // Останавливаем запись
-        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-            this.mediaRecorder.stop();
-        }
-
-        // Останавливаем локальный поток
-        if (this.localStream) {
-            this.localStream.getTracks().forEach(track => track.stop());
-            this.localStream = null;
-        }
-
-        // Уведомляем сервер
-        this.socket.emit('stop_microphone'); // ← Используем this.socket
-
-        this.isMicStreaming = false;
-        this.mediaRecorder = null;
-        this.updateButtonStates();
-        console.log('Трансляция микрофона остановлена');
     }
 
     // --- Общее управление ---
@@ -266,11 +168,6 @@ class AudioController {
         // Останавливаем локальное воспроизведение MP3
         if (this.isPlaying) {
             await this.stopLocalPlayback();
-        }
-
-        // Останавливаем трансляцию микрофона
-        if (this.isMicStreaming) {
-            await this.stopMicrophoneStream();
         }
 
         this.updateButtonStates();
@@ -290,11 +187,6 @@ class AudioController {
             if (currentBtn) {
                 currentBtn.classList.add('playing');
             }
-        }
-
-        // Показываем состояние микрофона ТОЛЬКО ЦВЕТОМ (без смены текста)
-        if (this.isMicStreaming) {
-            this.startMicBtn.classList.add('recording');
         }
     }
 
@@ -316,12 +208,8 @@ class AudioController {
 
     getStatus() {
         return {
-            // Локальное MP3
             isPlaying: this.isPlaying,
-            currentSound: this.currentSound,
-            // WebRTC микрофон
-            isMicStreaming: this.isMicStreaming,
-            webrtcConnected: this.webrtcConnection?.connectionState === 'connected'
+            currentSound: this.currentSound
         };
     }
 

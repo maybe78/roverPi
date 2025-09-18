@@ -93,8 +93,53 @@
 
     button:disabled {
       background-color: #666;
-      cursor: not-allowed;
+      cursor
+      : not-allowed;
     }
+    .tts-section {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+#ttsInput {
+  padding: 10px;
+  background-color: #222533;
+  color: #bbbbbb;
+  border: 2px solid #0055ff;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  width: 300px;
+}
+
+#ttsInput::placeholder {
+  color: #666;
+}
+
+.audio-button {
+  padding: 10px 20px;
+  background-color: #0055ff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.audio-button:hover {
+  background-color: #0044cc;
+}
+
+.audio-button.playing {
+  background-color: #ff6600;
+}
+
+.audio-button.recording {
+  background-color: #ff0000;
+}
   </style>
 </head>
 <body>
@@ -115,8 +160,12 @@
   <div class="controls" id="audio-controls">
     <button id="playSound1">🚨</button>
     <button id="playSound2">🎵</button>
-    <!-- <button id="startMic">🎤</button> -->
+    <button id="startMic">🎤</button>
     <button id="stopAll">🟥</button>
+  </div>
+  <div class="tts-section">
+    <input type="text" id="ttsInput" placeholder="Введите текст для озвучивания..." maxlength="500">
+    <button id="speakBtn" class="audio-button">🔊 Озвучить</button>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/socket.io-client/dist/socket.io.js"></script>
   <script src="/static/js/joystick.js"></script>

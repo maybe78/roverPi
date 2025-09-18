@@ -53,7 +53,9 @@ Run `sudo raspi-config` and apply the following settings:
 Update your system and install all required packages with a single command:
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt install git python3-pip python3-venv joystick libgl1 build-essential cmake libjpeg-dev libcamera0.5 libmosquitto1 libavformat59 libswscale6
+sudo apt install git python3-pip python3-venv joystick libgl1 build-essential cmake \
+    libjpeg-dev libcamera0.5 libmosquitto1  libavformat59 libswscale6 \
+    ffmpeg rhvoice rhvoice-russian
 ```
 ---
 
