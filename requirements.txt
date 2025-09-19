@@ -4,6 +4,7 @@ pyudev
 opencv-python-headless
 flask
 flask-socketio
+pygame
 aiortc
 aiohttp
 psutil

@@ -35,6 +35,7 @@ sleep 2 # Даем время серверу запуститься
 echo "Starting main control application..."
 $PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py
 
+#ffplay -nodisp -autoexit ~/roverPi/media/startup.mp3 
 # --- Очистка при завершении ---
 echo "Stopping background processes..."
 # Убиваем процесс pi-webrtc по имени при завершении скрипта

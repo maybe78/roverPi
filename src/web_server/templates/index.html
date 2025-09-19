@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>RoverPi Control</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Press Start 2P', cursive;
+      background-color: #0f192a;
+      color: #bbbbbb;
+      margin: 0;
+      padding: 10px;
+      user-select: none;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      color: #0055ff;
+      margin: 10px 0 15px 0;
+      text-align: center;
+      text-shadow: 1px 1px #001f66;
+    }
+
+    /* Видео контейнер с мини кнопками */
+    #video-container {
+      position: relative;
+      width: 100%;
+      height: 30vh;
+      min-height: 200px;
+      margin-bottom: 15px;
+    }
+
+    #webrtc-video {
+      background-color: #333844;
+      border: 3px solid #444444;
+      border-radius: 12px;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      box-shadow: 0 0 15px #000a1a;
+    }
+
+    #connection-status {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-size: 8px;
+      color: white;
+      background-color: #ff4444;
+    }
+
+    #connection-status.connected {
+      background-color: #44ff44;
+      color: black;
+    }
+
+    /* Мини кнопки управления видео на экране */
+    .video-controls {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      display: flex;
+      gap: 5px;
+    }
+
+    .video-controls button {
+      padding: 6px;
+      background-color: rgba(0, 85, 255, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+      min-width: 35px;
+      height: 30px;
+      backdrop-filter: blur(5px);
+    }
+
+    .video-controls button:hover {
+      background-color: rgba(0, 68, 204, 0.9);
+    }
+
+    .video-controls button:disabled {
+      background-color: rgba(102, 102, 102, 0.8);
+      cursor: not-allowed;
+    }
+
+    /* TTS поле с маленькой кнопкой справа */
+    .tts-section {
+      margin-bottom: 15px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #ttsInput {
+      flex: 1;
+      padding: 8px;
+      background-color: #222533;
+      color: #bbbbbb;
+      border: 2px solid #0055ff;
+      border-radius: 5px;
+      font-family: inherit;
+      font-size: 10px;
+    }
+
+    #ttsInput::placeholder {
+      color: #666;
+    }
+
+    #speakBtn {
+      width: 35px;
+      height: 35px;
+      background-color: #0055ff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    #speakBtn:hover {
+      background-color: #0044cc;
+    }
+
+    /* Джойстик */
+    .joystick-section {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+
+    #joystickDiv {
+      width: 160px;
+      height: 160px;
+      background-color: #222533;
+      border-radius: 50%;
+      border: 3px solid #0055ff;
+      box-shadow: 0 0 12px #0055ff;
+    }
+
+    /* Таблица с двумя колонками - узкая правая колонка для маленьких кнопок */
+    .controls-table {
+      display: grid;
+      grid-template-columns: 1fr 50px; /* Очень узкая правая колонка */
+      gap: 15px;
+      align-items: start;
+      width: 100%;
+    }
+
+    /* Левая колонка - мониторинг ресурсов */
+    .system-stats {
+      background-color: #222533;
+      border: 2px solid #0055ff;
+      border-radius: 10px;
+      padding: 12px;
+      width: 100%;
+    }
+
+    .system-stats h3 {
+      color: #0055ff;
+      font-size: 12px;
+      margin: 0 0 12px 0;
+      text-align: center;
+    }
+
+    .stat-item {
+      margin-bottom: 10px;
+    }
+
+    .stat-label {
+      font-size: 9px;
+      color: #bbbbbb;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 7px;
+      background-color: #333844;
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid #555;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .progress-fill.cpu { background-color: #ff6b6b; }
+    .progress-fill.memory { background-color: #4ecdc4; }
+    .progress-fill.swap { background-color: #ffe66d; }
+    .progress-fill.disk { background-color: #a8e6cf; }
+
+    .stat-text {
+      font-size: 7px;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    .temperature {
+      font-size: 9px;
+      color: #ff9f43;
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    /* Правая колонка - маленькие квадратные кнопки */
+    .audio-controls {
+      display: grid;
+      grid-template-rows: repeat(3, 1fr);
+      gap: 8px;
+      width: 100%;
+    }
+
+    .audio-controls button {
+      width: 50px;
+      height: 50px;
+      background-color: #0055ff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 16px; /* Размер эмодзи как на мини кнопках */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .audio-controls button:hover {
+      background-color: #0044cc;
+    }
+
+    .audio-controls button.playing {
+      background-color: #ff6600;
+    }
+
+    .audio-controls button.recording {
+      background-color: #ff0000;
+    }
+
+    /* Адаптивность для очень маленьких экранов */
+    @media (max-width: 400px) {
+      h1 {
+        font-size: 1.4rem;
+        margin: 5px 0 10px 0;
+      }
+
+      #video-container {
+        height: 25vh;
+        min-height: 180px;
+      }
+
+      #joystickDiv {
+        width: 140px;
+        height: 140px;
+      }
+
+      .controls-table {
+        grid-template-columns: 1fr 45px;
+        gap: 10px;
+      }
+
+      .audio-controls button {
+        width: 45px;
+        height: 45px;
+        font-size: 14px;
+      }
+
+      #speakBtn {
+        width: 30px;
+        height: 30px;
+        font-size: 12px;
+      }
+    }
+
+    /* Ландшафтная ориентация */
+    @media (orientation: landscape) {
+      body {
+        padding: 5px;
+      }
+      
+      h1 {
+        font-size: 1.4rem;
+        margin: 5px 0;
+      }
+
+      #video-container {
+        height: 40vh;
+      }
+
+      #joystickDiv {
+        width: 120px;
+        height: 120px;
+      }
+
+      .controls-table {
+        grid-template-columns: 2fr 60px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Заголовок -->
+  <h1>RoverPi</h1>
+
+  <!-- Экран видео с мини кнопками -->
+  <div id="video-container">
+  <video id="webrtc-video" 
+        autoplay 
+        playsinline 
+        muted 
+        webkit-playsinline="true">
+  </video>
+    <div id="connection-status">Подключение...</div>
+    
+    <!-- Мини кнопки управления видео на экране -->
+    <div class="video-controls">
+      <button id="start-button" onclick="startWebRTC()">▶️</button>
+      <button id="stop-button" onclick="stopWebRTC()" disabled>⏹️</button>
+    </div>
+  </div>
+
+  <!-- TTS поле с маленькой кнопкой озвучивания справа -->
+  <div class="tts-section">
+    <input type="text" id="ttsInput" placeholder="Введите текст для озвучивания..." maxlength="500">
+    <button id="speakBtn">🔊</button>
+  </div>
+
+  <!-- Джойстик -->
+  <div class="joystick-section">
+    <div id="joystickDiv"></div>
+  </div>
+
+  <!-- Таблица с двумя колонками -->
+  <div class="controls-table">
+    
+    <!-- Левая колонка - мониторинг ресурсов -->
+    <div class="system-stats">
+      <h3>📊 Система</h3>
+      
+      <div class="stat-item">
+        <div class="stat-label">
+          <span>CPU</span>
+          <span id="cpu-percent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill cpu" id="cpu-bar" style="width: 0%"></div>
+        </div>
+      </div>
+      
+      <div class="stat-item">
+        <div class="stat-label">
+          <span>Память</span>
+          <span id="memory-percent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill memory" id="memory-bar" style="width: 0%"></div>
+        </div>
+        <div class="stat-text" id="memory-text">0 MB / 0 MB</div>
+      </div>
+      
+      <div class="stat-item">
+        <div class="stat-label">
+          <span>Swap</span>
+          <span id="swap-percent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill swap" id="swap-bar" style="width: 0%"></div>
+        </div>
+        <div class="stat-text" id="swap-text">0 MB / 0 MB</div>
+      </div>
+      
+      <div class="temperature" id="temperature">🌡️ --°C</div>
+    </div>
+
+    <!-- Правая колонка - маленькие квадратные кнопки 50x50px -->
+    <div class="audio-controls">
+      <button id="playSound1">🚨</button>
+      <button id="playSound2">🎵</button>
+      <button id="stopAll">🟥</button>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client/dist/socket.io.js"></script>
+  <script src="/static/js/joystick.js"></script>
+  <script src="/static/js/main.js"></script>
+  <script src="/static/js/audio-control.js"></script>
+  <script src="/static/js/system-monitor.js"></script>
+</body>
+</html>

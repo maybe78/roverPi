@@ -1,19 +1,22 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Переменные для нового WebRTC ---
+    // --- Константы и переменные ---
+    const ROVER_IP = '192.168.0.38'; // IP вашего ровера
+    const JOYSTICK_SEND_INTERVAL = 100; // Отправлять команду каждые 100 мс
+
+    // WebRTC переменные
     let pc = null;
     const videoElement = document.getElementById('webrtc-video');
     const startButton = document.getElementById('start-button');
     const stopButton = document.getElementById('stop-button');
     const statusDiv = document.getElementById('connection-status');
-    const ROVER_IP = '192.168.0.38'; // IP вашего ровера
 
-    // --- Socket.IO для управления ---
+    // Socket.IO и джойстик
     const socket = io();
+    let joystickIntervalId = null;
+    let lastStickStatus = { lx: 0, ly: 0 };
+    const joystickContainer = document.getElementById('joystickDiv');
 
-    let lastCommandTime = 0;
-    const COMMAND_THROTTLE = 50;
-    let lastCommand = { lx: 0, ly: 0 };
-
+    // --- Инициализация джойстика ---
     const joy = new JoyStick('joystickDiv', {
         internalFillColor: '#444c5c',
         internalLineWidth: 3,
@@ -23,27 +26,54 @@ document.addEventListener('DOMContentLoaded', () => {
         autoReturnToCenter: true,
         radius: 70
     }, function(stickData) {
-        const now = Date.now();
-        const lx = parseFloat((stickData.x / 100).toFixed(2));
-        const ly = parseFloat((-stickData.y / 100).toFixed(2));
-
-        if ((now - lastCommandTime) >= COMMAND_THROTTLE && 
-            (Math.abs(lx - lastCommand.lx) > 0.01 || Math.abs(ly - lastCommand.ly) > 0.01)) {
-            
-            socket.emit('control', { lx, ly });
-            lastCommandTime = now;
-            lastCommand = { lx, ly };
-        }
+        // Этот callback вызывается только при движении.
+        // Мы просто сохраняем последнюю позицию.
+        lastStickStatus.lx = parseFloat((stickData.x / 100).toFixed(2));
+        lastStickStatus.ly = parseFloat((-stickData.y / 100).toFixed(2));
     });
 
-    // --- НОВЫЙ КОД ДЛЯ WEBRTC ---
+    // --- Управление отправкой команд джойстика ---
+
+    function startSendingJoystickData() {
+        if (joystickIntervalId) return; // Не запускать, если уже запущен
+
+        joystickIntervalId = setInterval(() => {
+            // Каждые 100 мс отправляем последнее известное положение
+            socket.emit('control', lastStickStatus);
+        }, JOYSTICK_SEND_INTERVAL);
+        console.log("Начата периодическая отправка данных джойстика.");
+    }
+
+    function stopSendingJoystickData() {
+        if (joystickIntervalId) {
+            clearInterval(joystickIntervalId);
+            joystickIntervalId = null;
+            // Отправляем финальную команду на остановку
+            lastStickStatus = { lx: 0, ly: 0 };
+            socket.emit('control', lastStickStatus);
+            console.log("Остановлена отправка данных. Моторы в 0.");
+        }
+    }
+    
+    // Вешаем обработчики на контейнер джойстика
+    joystickContainer.addEventListener('mousedown', startSendingJoystickData);
+    joystickContainer.addEventListener('touchstart', startSendingJoystickData);
+
+    joystickContainer.addEventListener('mouseup', stopSendingJoystickData);
+    joystickContainer.addEventListener('touchend', stopSendingJoystickData);
+    // Также на случай, если курсор "убежит" с джойстика
+    document.addEventListener('mouseup', stopSendingJoystickData);
+    document.addEventListener('touchend', stopSendingJoystickData);
+
+
+    // --- Логика WebRTC ---
     async function startWebRTC() {
-        if (pc) return; // Не запускаем, если уже запущено
+        if (pc) return;
 
         console.log('Starting WebRTC connection...');
         updateStatus('Подключение...', false);
         startButton.disabled = true;
-        
+
         pc = new RTCPeerConnection({
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
         });
@@ -62,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 stopButton.disabled = false;
             } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
                 updateStatus('Отключено', false);
-                stopWebRTC(); // Автоматически очищаем
+                stopWebRTC();
             }
         };
 
@@ -72,8 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            // Отправляем offer на pi-webrtc WHEP endpoint
-            const response = await fetch(`http://192.168.0.38:8080`, {
+            const response = await fetch(`https://192.168.0.38:8443`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/sdp' },
                 body: offer.sdp
@@ -113,25 +142,14 @@ document.addEventListener('DOMContentLoaded', () => {
         statusDiv.className = connected ? 'connected' : '';
     }
 
-    // Обработчик остановки движения
-    let stopTimeout = null;
-    function stopMovement() {
-        clearTimeout(stopTimeout);
-        stopTimeout = setTimeout(() => {
-            socket.emit('control', { lx: 0.0, ly: 0.0 });
-        }, 100);
-    }
-    document.addEventListener('touchend', stopMovement);
-    document.addEventListener('mouseup', stopMovement);
-
-    // Socket.IO обработчики
+    // --- Socket.IO обработчики ---
     socket.on('connect', () => console.log('Connected to control server.'));
     socket.on('disconnect', () => console.log('Disconnected from control server.'));
 
-    // Привязываем функции к кнопкам
+    // --- Глобальные функции и автозапуск ---
     window.startWebRTC = startWebRTC;
     window.stopWebRTC = stopWebRTC;
-    
+
     // Автоматический запуск видео при загрузке
     setTimeout(startWebRTC, 500);
 });
