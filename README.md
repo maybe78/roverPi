@@ -54,8 +54,9 @@ Update your system and install all required packages with a single command:
 ```bash
 sudo apt update && sudo apt upgrade
 sudo apt install git python3-pip python3-venv joystick libgl1 build-essential cmake \
-    libjpeg-dev libcamera0.5 libmosquitto1  libavformat59 libswscale6 \
-    ffmpeg rhvoice rhvoice-russian
+    libjpeg-dev libcamera0.5 libmosquitto1  libavformat59 libswscale6 libcap-dev \
+    ffmpeg rhvoice rhvoice-russian \
+    
 ```
 ---
 
@@ -69,7 +70,7 @@ cd roverPi
 #### 2. Set Up Python Environment
 Create a virtual environment
 ```bash
-python3 -m venv venv
+python3 -m venv --system-site-packages venv
 ```
 Activate the environment
 ```bash

@@ -14,6 +14,7 @@ from audio_player import AudioPlayer
 
 # Новый импорт для веб-сервера
 from web_server.app_factory import create_app
+from object_detector import VirtualCameraObjectDetector
 
 # --- НАСТРОЙКИ ---
 dead_zone = 10
@@ -44,6 +45,18 @@ app, socketio = create_app(web_commands, audio_player)
 
 thread_count_lock = Lock()
 active_threads = 0
+
+# Инициализация детектора объектов
+object_detector = None
+
+def start_object_detection():
+    global object_detector
+    try:
+        logger.info("Инициализация детектора объектов...")
+        object_detector = VirtualCameraObjectDetector(input_device_index=0, output_device="/dev/video2")
+        object_detector.run()
+    except Exception as e:
+        logger.error(f"Ошибка в детекторе объектов: {e}")
 
 # --- ПРОВЕРКА МОТОРОВ  ---      
 # def check_motor_controller():
@@ -122,7 +135,14 @@ if __name__ == '__main__':
                                     daemon=True, 
                                     name="MotorControlThread")
         motor_thread.start()
-        
+
+        # Создаем и запускаем поток для детекции объектов
+        detection_thread = Thread(target=start_object_detection,
+                                 daemon=True,
+                                 name="ObjectDetectionThread")
+        detection_thread.start()
+        logger.info("Поток детекции объектов запущен")
+
         # Запускаем веб-сервер в основном потоке
         logger.info("Запуск веб-сервера на http://0.0.0.0:5000")
         socketio.run(app, host='0.0.0.0', port=5000, ssl_context=('certs/cert.pem', 'certs/key.pem'), allow_unsafe_werkzeug=True)
@@ -133,4 +153,6 @@ if __name__ == '__main__':
         cleanup()
         if motor_thread and motor_thread.is_alive():
             motor_thread.join(timeout=2.0)
+        if detection_thread and detection_thread.is_alive():
+            detection_thread.join(timeout=2.0)
         logger.info("Программа завершена.")
