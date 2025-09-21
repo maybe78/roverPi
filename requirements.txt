@@ -8,3 +8,6 @@ pygame
 aiortc
 aiohttp
 psutil
+v4l2-python3
+picamera2
+requests

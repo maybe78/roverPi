@@ -12,9 +12,9 @@ logger = logging.getLogger('rover')
 
 # Пути к предустановленным звукам
 PRESET_SOUNDS = {
-    "sound1": "media/police.mp3", 
-    "sound2": "media/startup.mp3",
-    "mic_placeholder": "media/juje.mp3"
+    "sound1": "/home/volodya/roverPi/media/police.mp3", 
+    "sound2": "/home/volodya/roverPi/media/startup.mp3",
+    "mic_placeholder": "/home/volodya/roverPi/media/juje.mp3"
 }
 
 # --- Локальное воспроизведение MP3 ---
