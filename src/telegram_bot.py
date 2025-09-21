@@ -222,4 +222,54 @@ class TelegramBot:
                               camera_index: int = 0, chat_id: Optional[str] = None,
                               delete_after_send: bool = True) -> dict:
         """
-        Захват ф
+        Захват фото с камеры и отправка в Telegram
+        
+        Args:
+            caption (str, optional): Подпись к фото
+            camera_index (int): Индекс камеры
+            chat_id (str, optional): ID чата. Если не указан, используется default_chat_id
+            delete_after_send (bool): Удалить файл после отправки
+            
+        Returns:
+            dict: Ответ от Telegram API
+        """
+        # Захват фото
+        photo_path = self.capture_photo_from_camera(camera_index)
+        
+        if photo_path is None:
+            return {"ok": False, "error": "Не удалось захватить фото"}
+        
+        try:
+            # Отправка фото
+            result = self.send_photo_message(photo_path, caption, chat_id)
+            
+            # Удаление временного файла
+            if delete_after_send and os.path.exists(photo_path):
+                os.remove(photo_path)
+                self.logger.info(f"Временный файл {photo_path} удален")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка при отправке захваченного фото: {e}")
+            return {"ok": False, "error": str(e)}
+
+
+# Пример использования класса
+if __name__ == "__main__":
+    # Теперь можно создавать бота без параметров - все настройки в классе
+    bot = TelegramBot()
+    
+    # 1. Отправка текстового сообщения (используется default_chat_id)
+    text_result = bot.send_text_message("Привет! Это тестовое сообщение от бота.")
+    print("Результат отправки текста:", text_result)
+    
+    # 2. Захват и отправка фото с камеры (используется default_chat_id)
+    photo_result = bot.capture_and_send_photo(caption="Фото с камеры")
+    print("Результат отправки фото:", photo_result)
+    
+    # 3. Отправка существующего изображения (используется default_chat_id)
+    # file_result = bot.send_photo_message("путь/к/изображению.jpg", "Подпись к изображению")
+    
+    # 4. Отправка в другой чат (переопределяем chat_id)
+    # other_result = bot.send_text_message("Сообщение в другой чат", chat_id="OTHER_CHAT_ID")
