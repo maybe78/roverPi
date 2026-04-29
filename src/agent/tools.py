@@ -210,29 +210,9 @@ def build_registry(
     # -----------------------------------------------------------------------
     # Communication
     # -----------------------------------------------------------------------
-
-    def speak(text: str) -> str:
-        err = _require(tts, "TTS")
-        if err:
-            return err
-        tts.say(text)
-        return f"Сказал: {text[:80]}"
-
-    reg.register(speak, {
-        "type": "function",
-        "function": {
-            "name": "speak",
-            "description": "Произнести текст вслух через динамик.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "Текст для озвучивания"},
-                },
-                "required": ["text"],
-            },
-        },
-    })
-
+    # NOTE: speak() is intentionally NOT a tool.
+    # The agent's text response is always auto-spoken by the agent loop.
+    # Having speak() as a tool caused double TTS (tool call + auto-speak).
     # -----------------------------------------------------------------------
 
     def send_notification(message: str, with_photo: bool = False) -> str:
