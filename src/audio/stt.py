@@ -36,6 +36,7 @@ class STT:
                 model_size,
                 device="cpu",
                 compute_type="int8",   # faster on Pi
+                local_files_only=True, # skip HF network check, use cache
             )
             logger.info(f"Whisper model '{model_size}' loaded")
         except ImportError:
@@ -94,14 +95,20 @@ class STT:
                     silence_count = 0
                     recording = False
 
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            blocksize=CHUNK,
-            device=self._device_index,
-            callback=callback,
-        ):
+        try:
+            stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=CHUNK,
+                device=self._device_index,
+                callback=callback,
+            )
+        except Exception as e:
+            logger.error(f"Microphone unavailable: {e} — STT disabled")
+            return
+
+        with stream:
             while self._running:
                 sd.sleep(100)
 
