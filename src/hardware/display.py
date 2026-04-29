@@ -92,14 +92,31 @@ class FaceDisplay:
         except Exception as e:
             logger.warning(f"Display unavailable: {e}")
 
-    def _open_fb(self) -> None:
-        """Open framebuffer and mmap it once for fast writes."""
-        import mmap
-        self._fb_file = open(self._fb, "r+b")
-        self._fb_mmap = mmap.mmap(self._fb_file.fileno(), self.W * self.H * 2)
+    def _claim_tty(self) -> None:
+        """Switch tty1 to KD_GRAPHICS so fbcon stops overwriting our fb writes.
+        Requires sudo access (rover runs as root via systemd, or sudoers entry)."""
+        try:
+            import fcntl
+            KDSETMODE = 0x4B3A
+            KD_GRAPHICS = 0x01
+            with open("/dev/tty1", "wb") as tty:
+                fcntl.ioctl(tty, KDSETMODE, KD_GRAPHICS)
+            logger.info("TTY1 → KD_GRAPHICS (fbcon stopped)")
+        except Exception as e:
+            logger.warning(f"Could not claim tty1: {e}")
+
+    def _release_tty(self) -> None:
+        try:
+            import fcntl
+            KDSETMODE = 0x4B3A
+            KD_TEXT = 0x00
+            with open("/dev/tty1", "wb") as tty:
+                fcntl.ioctl(tty, KDSETMODE, KD_TEXT)
+        except Exception:
+            pass
 
     def _flush_to_fb(self) -> None:
-        """Convert pygame surface to RGB565 and blit to framebuffer via mmap."""
+        """Convert pygame surface to RGB565 and write to framebuffer."""
         try:
             import numpy as np
             arr = self._pg.surfarray.array3d(self._screen)  # (W, H, 3)
@@ -107,8 +124,8 @@ class FaceDisplay:
             rgb565 = ((arr[:, :, 0] & 0xF8) << 8) | \
                      ((arr[:, :, 1] & 0xFC) << 3) | \
                      (arr[:, :, 2] >> 3)
-            self._fb_mmap.seek(0)
-            self._fb_mmap.write(rgb565.tobytes())
+            with open(self._fb, "wb") as f:
+                f.write(rgb565.tobytes())
         except Exception as e:
             logger.debug(f"FB flush error: {e}")
 
@@ -149,6 +166,8 @@ class FaceDisplay:
 
     def stop(self) -> None:
         self._running = False
+        if not self._mock:
+            self._release_tty()
         if self._pygame_ok:
             try:
                 self._pg.display.quit()
@@ -162,7 +181,7 @@ class FaceDisplay:
     def _render_loop(self) -> None:
         pg = self._pg
         if not self._mock and self._fb:
-            self._open_fb()
+            self._claim_tty()
         t = 0.0
         blink_next = random.uniform(2.0, 5.0)
         blink_start = 0.0
