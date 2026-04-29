@@ -89,6 +89,11 @@ class Lidar:
     def available(self) -> bool:
         return self._laser is not None
 
+    def get_full_scan(self) -> dict:
+        """Return full 360° scan {angle_deg: distance_mm}."""
+        with self._lock:
+            return dict(self._scan)
+
     def get_nearest_by_sector(self) -> dict:
         """Return nearest distance (mm) per sector. -1 = no reading."""
         with self._lock:

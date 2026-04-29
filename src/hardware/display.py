@@ -1,18 +1,15 @@
 """
-Face animation for 320×480 SPI color display (ILI9488 / ST7796).
+Face animation + lidar radar for 320×480 SPI display (ILI9488/ST7796).
 
-The display is driven via the Linux framebuffer (/dev/fb1).
-pygame renders to the framebuffer directly.
+Layout (portrait 320×480):
+  ┌──────────────────┐  0
+  │   FACE  320×240  │
+  ├──────────────────┤  240
+  │   RADAR 320×240  │
+  └──────────────────┘  480
 
-States and their visual:
-  idle       — eyes blinking slowly at random intervals
-  listening  — eyes wide open, cyan iris
-  thinking   — eyes half-closed, rotating dots below
-  speaking   — mouth animates open/close
-  happy      — eyes curved up (^_^)
-  surprised  — eyes fully round, raised eyebrows
-  angry      — V-shaped eyebrows, narrowed eyes
-  sad        — eyes curved down, drooped lids
+Hardware: rendered to Linux framebuffer /dev/fb1.
+Mock mode: regular pygame desktop window.
 """
 
 import logging
@@ -25,51 +22,59 @@ from typing import Optional
 
 logger = logging.getLogger("rover.display")
 
-# Colours
-BG      = (15,  25,  42)
-WHITE   = (220, 220, 220)
-CYAN    = (0,   200, 255)
-YELLOW  = (255, 220, 0)
-RED     = (220, 50,  50)
-BLUE    = (50,  100, 220)
+# --- Palette ---
+BG        = (10,  18,  35)
+BG_RADAR  = (5,   12,  22)
+WHITE     = (220, 220, 220)
+CYAN      = (0,   200, 255)
+YELLOW    = (255, 215, 0)
+RED       = (220, 50,  50)
+BLUE      = (50,  100, 220)
+DIM       = (60,  70,  90)
+GRID      = (20,  35,  55)
+
+# radar colours by distance
+_NEAR_COL  = (255, 60,  60)    # < 500 mm
+_MID_COL   = (255, 180, 30)    # 500–1500 mm
+_FAR_COL   = (60,  220, 100)   # > 1500 mm
 
 
 class FaceDisplay:
-    W = 320
-    H = 480
+    W  = 320
+    H  = 480
+    HH = 240   # half-height split
 
     def __init__(self, fb_device: str = "/dev/fb1", rotation: int = 0,
                  mock: bool = False):
-        self._fb = fb_device
+        self._fb       = fb_device
         self._rotation = rotation
-        self._mock = mock
-        self._state = "idle"
-        self._prev_state = None
-        self._running = False
+        self._mock     = mock
+        self._state    = "idle"
+        self._scan: dict[int, float] = {}   # latest lidar scan
+        self._scan_lock = threading.Lock()
+        self._running  = False
         self._thread: Optional[threading.Thread] = None
-        self._screen = None
-        self._clock = None
+        self._screen   = None
+        self._clock    = None
         self._pygame_ok = False
+        self._pg        = None
         self._init_pygame()
 
     def _init_pygame(self) -> None:
         try:
-            import pygame
+            import pygame as pg
             if not self._mock:
-                # Real hardware: render to framebuffer
                 os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
                 os.environ.setdefault("SDL_FBDEV", self._fb)
                 os.environ["SDL_NOMOUSE"] = "1"
-            # Mock / desktop: let pygame use the default windowed driver
-            pygame.init()
-            flags = 0 if self._mock else 0
-            self._screen = pygame.display.set_mode((self.W, self.H), flags)
-            pygame.display.set_caption("Rover Face" + (" [MOCK]" if self._mock else ""))
-            self._clock = pygame.time.Clock()
-            self._pygame = pygame
+            pg.init()
+            self._screen = pg.display.set_mode((self.W, self.H))
+            pg.display.set_caption("Rover" + (" [MOCK]" if self._mock else ""))
+            self._clock = pg.time.Clock()
+            self._pg = pg
             self._pygame_ok = True
-            mode = "desktop window" if self._mock else self._fb
-            logger.info(f"Display ready ({self.W}×{self.H}) → {mode}")
+            mode = "desktop" if self._mock else self._fb
+            logger.info(f"Display ready {self.W}×{self.H} → {mode}")
         except Exception as e:
             logger.warning(f"Display unavailable: {e}")
 
@@ -79,6 +84,11 @@ class FaceDisplay:
 
     def set_state(self, state: str) -> None:
         self._state = state
+
+    def update_radar(self, scan: dict) -> None:
+        """Feed latest full 360° scan {angle_deg: distance_mm}."""
+        with self._scan_lock:
+            self._scan = dict(scan)
 
     def start(self) -> None:
         if not self._pygame_ok:
@@ -93,65 +103,135 @@ class FaceDisplay:
         self._running = False
         if self._pygame_ok:
             try:
-                self._pygame.quit()
+                self._pg.quit()
             except Exception:
                 pass
 
     # ------------------------------------------------------------------
-    # Render loop
+    # Main render loop
     # ------------------------------------------------------------------
 
     def _render_loop(self) -> None:
-        pg = self._pygame
+        pg = self._pg
         t = 0.0
-        blink_t = random.uniform(2.0, 5.0)
-        blink_dur = 0.12
-        blinking = False
+        blink_next = random.uniform(2.0, 5.0)
         blink_start = 0.0
+        blinking = False
         mouth_phase = 0.0
 
         while self._running:
             dt = self._clock.tick(30) / 1000.0
             t += dt
 
-            for event in pg.event.get():
-                if event.type == pg.QUIT:
+            for ev in pg.event.get():
+                if ev.type == pg.QUIT:
                     self._running = False
 
             state = self._state
-            screen = self._screen
-            screen.fill(BG)
+            scr = self._screen
+            scr.fill(BG)
 
-            # blink logic (only in idle / listening)
+            # blink
             if state in ("idle", "listening"):
-                if not blinking and t >= blink_t:
+                if not blinking and t >= blink_next:
                     blinking = True
                     blink_start = t
-                if blinking and (t - blink_start) > blink_dur:
+                if blinking and (t - blink_start) > 0.12:
                     blinking = False
-                    blink_t = t + random.uniform(2.0, 6.0)
+                    blink_next = t + random.uniform(2.0, 6.0)
             else:
                 blinking = False
 
             blink_ratio = 0.0
             if blinking:
-                progress = (t - blink_start) / blink_dur
-                blink_ratio = math.sin(progress * math.pi)
+                blink_ratio = math.sin((t - blink_start) / 0.12 * math.pi)
 
             if state == "speaking":
                 mouth_phase += dt * 8.0
 
-            self._draw_face(screen, pg, state, blink_ratio, t, mouth_phase)
+            # --- TOP: face ---
+            face_surf = scr.subsurface((0, 0, self.W, self.HH))
+            face_surf.fill(BG)
+            self._draw_face(face_surf, pg, state, blink_ratio, t, mouth_phase)
+
+            # divider
+            pg.draw.line(scr, GRID, (0, self.HH), (self.W, self.HH), 1)
+
+            # --- BOTTOM: radar ---
+            radar_surf = scr.subsurface((0, self.HH, self.W, self.HH))
+            radar_surf.fill(BG_RADAR)
+            with self._scan_lock:
+                scan = dict(self._scan)
+            self._draw_radar(radar_surf, pg, scan, t)
+
             pg.display.flip()
 
     # ------------------------------------------------------------------
-    # Drawing helpers
+    # RADAR
     # ------------------------------------------------------------------
 
-    def _draw_face(self, screen, pg, state, blink_ratio, t, mouth_phase):
-        cx = self.W // 2
-        eye_y = self.H // 2 - 60
-        eye_gap = 70
+    def _draw_radar(self, surf, pg, scan: dict, t: float) -> None:
+        cx, cy = self.W // 2, self.HH // 2
+        max_r = 105    # px  — represents MAX_DIST_MM
+        MAX_DIST = 3500.0
+
+        # grid rings  (1 m, 2 m, 3 m)
+        for ring_mm, label in [(1000, "1m"), (2000, "2m"), (3000, "3m")]:
+            r_px = int(ring_mm / MAX_DIST * max_r)
+            pg.draw.circle(surf, GRID, (cx, cy), r_px, 1)
+
+        # cross-hairs
+        pg.draw.line(surf, GRID, (cx, cy - max_r), (cx, cy + max_r), 1)
+        pg.draw.line(surf, GRID, (cx - max_r, cy), (cx + max_r, cy), 1)
+
+        # scan points
+        if scan:
+            for angle_deg, dist_mm in scan.items():
+                if dist_mm <= 0:
+                    continue
+                r_px = min(int(dist_mm / MAX_DIST * max_r), max_r)
+                # 0° = forward = up on screen  → subtract 90°
+                rad = math.radians(angle_deg - 90)
+                px = cx + int(r_px * math.cos(rad))
+                py = cy + int(r_px * math.sin(rad))
+
+                if dist_mm < 500:
+                    col = _NEAR_COL
+                    dot_r = 3
+                elif dist_mm < 1500:
+                    col = _MID_COL
+                    dot_r = 2
+                else:
+                    col = _FAR_COL
+                    dot_r = 1
+
+                pg.draw.circle(surf, col, (px, py), dot_r)
+
+        # robot body — small arrow pointing forward (up)
+        body_pts = [
+            (cx,      cy - 10),   # nose
+            (cx - 7,  cy + 8),
+            (cx,      cy + 4),
+            (cx + 7,  cy + 8),
+        ]
+        pg.draw.polygon(surf, CYAN, body_pts)
+
+        # "RADAR" label top-right
+        try:
+            font = pg.font.SysFont("monospace", 11)
+            label_surf = font.render("RADAR", True, DIM)
+            surf.blit(label_surf, (self.W - 52, 4))
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # FACE
+    # ------------------------------------------------------------------
+
+    def _draw_face(self, surf, pg, state, blink_ratio, t, mouth_phase):
+        cx   = self.W // 2
+        eye_y = self.HH // 2 - 20
+        eye_gap = 68
         lx, rx = cx - eye_gap, cx + eye_gap
 
         colour = {
@@ -166,93 +246,94 @@ class FaceDisplay:
         }.get(state, CYAN)
 
         if state == "happy":
-            self._draw_happy_eyes(screen, pg, lx, rx, eye_y, colour)
+            self._eyes_happy(surf, pg, lx, rx, eye_y, colour)
         elif state == "surprised":
-            self._draw_surprised_eyes(screen, pg, lx, rx, eye_y, colour)
+            self._eyes_surprised(surf, pg, lx, rx, eye_y, colour)
         elif state == "angry":
-            self._draw_angry_eyes(screen, pg, lx, rx, eye_y, colour, blink_ratio)
+            self._eyes_angry(surf, pg, lx, rx, eye_y, colour, blink_ratio)
         elif state == "sad":
-            self._draw_sad_eyes(screen, pg, lx, rx, eye_y, colour, blink_ratio)
+            self._eyes_sad(surf, pg, lx, rx, eye_y, colour, blink_ratio)
         elif state == "thinking":
-            self._draw_normal_eyes(screen, pg, lx, rx, eye_y, colour, blink_ratio=0.4)
-            self._draw_thinking_dots(screen, pg, cx, eye_y + 120, t)
+            self._eyes_normal(surf, pg, lx, rx, eye_y, colour, 0.4)
+            self._thinking_dots(surf, pg, cx, eye_y + 90, t)
         else:
-            self._draw_normal_eyes(screen, pg, lx, rx, eye_y, colour, blink_ratio)
+            self._eyes_normal(surf, pg, lx, rx, eye_y, colour, blink_ratio)
 
         if state == "speaking":
-            self._draw_mouth(screen, pg, cx, eye_y + 130, mouth_phase)
+            self._mouth_talking(surf, pg, cx, eye_y + 95, mouth_phase)
         elif state in ("happy", "surprised"):
-            self._draw_smile(screen, pg, cx, eye_y + 130, state)
+            self._mouth_smile(surf, pg, cx, eye_y + 95, state)
 
-    def _draw_normal_eyes(self, screen, pg, lx, rx, ey, colour, blink_ratio):
-        r = 36
+        # state label (small, bottom of face area)
+        try:
+            font = pg.font.SysFont("monospace", 11)
+            lbl  = font.render(state.upper(), True, DIM)
+            surf.blit(lbl, (self.W // 2 - lbl.get_width() // 2,
+                            self.HH - 18))
+        except Exception:
+            pass
+
+    # --- eye helpers ---
+
+    def _eyes_normal(self, surf, pg, lx, rx, ey, col, blink_ratio):
+        r = 32
         for ex in (lx, rx):
-            # white sclera
-            pg.draw.circle(screen, WHITE, (ex, ey), r)
-            # blink lid (top down)
-            lid_h = int(r * 2 * blink_ratio)
-            if lid_h > 0:
-                pg.draw.rect(screen, BG, (ex - r, ey - r, r * 2, lid_h))
-            # iris
-            pg.draw.circle(screen, colour, (ex, ey), int(r * 0.55))
-            # pupil
-            pg.draw.circle(screen, (0, 0, 0), (ex, ey), int(r * 0.25))
-            # shine
-            pg.draw.circle(screen, WHITE, (ex - 8, ey - 8), 6)
+            pg.draw.circle(surf, WHITE, (ex, ey), r)
+            lid = int(r * 2 * blink_ratio)
+            if lid > 0:
+                pg.draw.rect(surf, BG, (ex - r, ey - r, r * 2, lid))
+            pg.draw.circle(surf, col, (ex, ey), int(r * 0.55))
+            pg.draw.circle(surf, (0, 0, 0), (ex, ey), int(r * 0.25))
+            pg.draw.circle(surf, WHITE, (ex - 7, ey - 7), 5)
 
-    def _draw_happy_eyes(self, screen, pg, lx, rx, ey, colour):
-        r = 36
+    def _eyes_happy(self, surf, pg, lx, rx, ey, col):
+        r = 32
         for ex in (lx, rx):
-            pg.draw.circle(screen, WHITE, (ex, ey), r)
-            # cover bottom half
-            pg.draw.rect(screen, BG, (ex - r - 2, ey, r * 2 + 4, r + 4))
-            pg.draw.arc(screen, colour,
-                        (ex - r, ey - r, r * 2, r * 2),
-                        0, math.pi, 5)
+            pg.draw.circle(surf, WHITE, (ex, ey), r)
+            pg.draw.rect(surf, BG, (ex - r - 2, ey, r * 2 + 4, r + 4))
+            pg.draw.arc(surf, col,
+                        (ex - r, ey - r, r * 2, r * 2), 0, math.pi, 5)
 
-    def _draw_surprised_eyes(self, screen, pg, lx, rx, ey, colour):
-        r = 44
+    def _eyes_surprised(self, surf, pg, lx, rx, ey, col):
+        r = 38
         for ex in (lx, rx):
-            pg.draw.circle(screen, WHITE, (ex, ey), r)
-            pg.draw.circle(screen, colour, (ex, ey), int(r * 0.6))
-            pg.draw.circle(screen, (0, 0, 0), (ex, ey), int(r * 0.3))
-            pg.draw.circle(screen, WHITE, (ex - 10, ey - 10), 7)
-            # raised eyebrow
-            pg.draw.line(screen, WHITE,
-                         (ex - r + 4, ey - r - 12),
-                         (ex + r - 4, ey - r - 18), 4)
+            pg.draw.circle(surf, WHITE, (ex, ey), r)
+            pg.draw.circle(surf, col, (ex, ey), int(r * 0.6))
+            pg.draw.circle(surf, (0, 0, 0), (ex, ey), int(r * 0.3))
+            pg.draw.circle(surf, WHITE, (ex - 9, ey - 9), 6)
+            pg.draw.line(surf, WHITE,
+                         (ex - r + 4, ey - r - 10),
+                         (ex + r - 4, ey - r - 16), 4)
 
-    def _draw_angry_eyes(self, screen, pg, lx, rx, ey, colour, blink_ratio):
-        self._draw_normal_eyes(screen, pg, lx, rx, ey, colour, blink_ratio)
-        # V-shaped inner brows
+    def _eyes_angry(self, surf, pg, lx, rx, ey, col, blink_ratio):
+        self._eyes_normal(surf, pg, lx, rx, ey, col, blink_ratio)
         for ex, sign in ((lx, 1), (rx, -1)):
-            inner = (ex + sign * 10, ey - 40)
-            outer = (ex - sign * 30, ey - 55)
-            pg.draw.line(screen, WHITE, inner, outer, 5)
+            pg.draw.line(surf, WHITE,
+                         (ex + sign * 10, ey - 36),
+                         (ex - sign * 28, ey - 50), 5)
 
-    def _draw_sad_eyes(self, screen, pg, lx, rx, ey, colour, blink_ratio):
-        self._draw_normal_eyes(screen, pg, lx, rx, ey, colour, blink_ratio)
-        r = 36
+    def _eyes_sad(self, surf, pg, lx, rx, ey, col, blink_ratio):
+        self._eyes_normal(surf, pg, lx, rx, ey, col, blink_ratio)
+        r = 32
         for ex, sign in ((lx, -1), (rx, 1)):
-            outer = (ex + sign * (r - 4), ey - r + 10)
-            inner = (ex - sign * (r - 14), ey - r - 8)
-            pg.draw.line(screen, WHITE, inner, outer, 4)
+            pg.draw.line(surf, WHITE,
+                         (ex + sign * (r - 4), ey - r + 10),
+                         (ex - sign * (r - 14), ey - r - 8), 4)
 
-    def _draw_mouth(self, screen, pg, cx, my, phase):
-        opening = int(14 * abs(math.sin(phase)))
-        pg.draw.ellipse(screen, WHITE,
-                        (cx - 28, my - opening // 2, 56, max(4, opening)))
+    def _mouth_talking(self, surf, pg, cx, my, phase):
+        opening = int(12 * abs(math.sin(phase)))
+        pg.draw.ellipse(surf, WHITE,
+                        (cx - 26, my - opening // 2, 52, max(4, opening)))
 
-    def _draw_smile(self, screen, pg, cx, my, state):
+    def _mouth_smile(self, surf, pg, cx, my, state):
         if state == "happy":
-            pg.draw.arc(screen, WHITE,
-                        (cx - 40, my - 20, 80, 40),
-                        math.pi, 2 * math.pi, 5)
+            pg.draw.arc(surf, WHITE,
+                        (cx - 36, my - 18, 72, 36), math.pi, 2 * math.pi, 4)
         elif state == "surprised":
-            pg.draw.ellipse(screen, WHITE, (cx - 18, my - 10, 36, 30))
+            pg.draw.ellipse(surf, WHITE, (cx - 16, my - 10, 32, 26))
 
-    def _draw_thinking_dots(self, screen, pg, cx, dy, t):
+    def _thinking_dots(self, surf, pg, cx, dy, t):
         for i in range(3):
-            offset = math.sin(t * 4 + i * 1.2) * 8
-            pg.draw.circle(screen, CYAN,
-                           (cx - 24 + i * 24, int(dy + offset)), 7)
+            offset = math.sin(t * 4 + i * 1.2) * 7
+            pg.draw.circle(surf, CYAN,
+                           (cx - 20 + i * 20, int(dy + offset)), 6)

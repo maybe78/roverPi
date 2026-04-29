@@ -61,6 +61,23 @@ def main():
     ).start()
 
     # ------------------------------------------------------------------
+    # Radar feed loop — pushes lidar scan to display at ~10 Hz
+    # ------------------------------------------------------------------
+    def radar_loop():
+        while not shutdown_event.is_set():
+            try:
+                if hasattr(c.lidar, "get_full_scan"):
+                    scan = c.lidar.get_full_scan()
+                    c.display.update_radar(scan)
+            except Exception as e:
+                logger.debug(f"Radar loop error: {e}")
+            sleep(0.1)
+
+    threading.Thread(
+        target=radar_loop, daemon=True, name="RadarThread"
+    ).start()
+
+    # ------------------------------------------------------------------
     # Motor control loop  (gamepad > web)
     # ------------------------------------------------------------------
     pad = None
