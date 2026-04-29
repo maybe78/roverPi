@@ -177,11 +177,33 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
 
     logger.info(f"Web UI → http://{config.WEB_HOST}:{config.WEB_PORT}")
-    try:
-        socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT,
-                     allow_unsafe_werkzeug=True)
-    except (KeyboardInterrupt, SystemExit):
-        shutdown()
+
+    # ------------------------------------------------------------------
+    # macOS: pygame MUST run on the main thread (Cocoa restriction).
+    # In that case Flask runs in a background thread instead.
+    # On Linux (Pi): Flask is on main thread, pygame in background thread.
+    # ------------------------------------------------------------------
+    if c.display.needs_main_thread:
+        flask_thread = threading.Thread(
+            target=lambda: socketio.run(
+                app, host=config.WEB_HOST, port=config.WEB_PORT,
+                allow_unsafe_werkzeug=True
+            ),
+            daemon=True,
+            name="FlaskThread",
+        )
+        flask_thread.start()
+        try:
+            c.display.run()          # blocks main thread — this is correct on macOS
+        except (KeyboardInterrupt, SystemExit):
+            shutdown()
+    else:
+        c.display.start()            # background thread on Pi
+        try:
+            socketio.run(app, host=config.WEB_HOST, port=config.WEB_PORT,
+                         allow_unsafe_werkzeug=True)
+        except (KeyboardInterrupt, SystemExit):
+            shutdown()
 
 
 if __name__ == "__main__":

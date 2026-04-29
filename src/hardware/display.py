@@ -94,14 +94,28 @@ class FaceDisplay:
         with self._scan_lock:
             self._scan = dict(scan)
 
+    @property
+    def needs_main_thread(self) -> bool:
+        """True on macOS — SDL/Cocoa requires pygame on the main thread."""
+        import platform
+        return self._mock and platform.system() == "Darwin"
+
     def start(self) -> None:
-        if not self._pygame_ok:
+        """Start render loop in a background thread (Linux/Pi only)."""
+        if not self._pygame_ok or self.needs_main_thread:
             return
         self._running = True
         self._thread = threading.Thread(
             target=self._render_loop, daemon=True, name="DisplayThread"
         )
         self._thread.start()
+
+    def run(self) -> None:
+        """Run render loop on the calling thread (required on macOS)."""
+        if not self._pygame_ok:
+            return
+        self._running = True
+        self._render_loop()
 
     def stop(self) -> None:
         self._running = False
