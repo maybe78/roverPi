@@ -66,7 +66,7 @@ class FaceDisplay:
         try:
             import pygame as pg
             if not self._mock:
-                os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
+                os.environ.setdefault("SDL_VIDEODRIVER", "fbdev")
                 os.environ.setdefault("SDL_FBDEV", self._fb)
                 os.environ["SDL_NOMOUSE"] = "1"
             # Init only display + font — do NOT call pg.init() which also
