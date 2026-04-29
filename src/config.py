@@ -53,7 +53,8 @@ OBSTACLE_DISTANCE_CM = 30
 # Physical display: 480×320 landscape, RGB565, /dev/fb0
 DISPLAY_WIDTH  = 480
 DISPLAY_HEIGHT = 320
-DISPLAY_FB     = os.getenv("DISPLAY_FB", "/dev/fb0")
+DISPLAY_FB       = os.getenv("DISPLAY_FB", "/dev/fb0")
+DISPLAY_ROTATION = int(os.getenv("DISPLAY_ROTATION", "0"))
 
 # --- Bluetooth speaker ---
 BT_SPEAKER_MAC = os.getenv("BT_SPEAKER_MAC", "")   # "XX:XX:XX:XX:XX:XX"
