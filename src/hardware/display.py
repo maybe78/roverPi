@@ -60,6 +60,8 @@ class FaceDisplay:
         self._clock    = None
         self._pygame_ok = False
         self._pg        = None
+        self._fb_file  = None
+        self._fb_mmap  = None
         self._init_pygame()
 
     def _init_pygame(self) -> None:
@@ -90,8 +92,14 @@ class FaceDisplay:
         except Exception as e:
             logger.warning(f"Display unavailable: {e}")
 
+    def _open_fb(self) -> None:
+        """Open framebuffer and mmap it once for fast writes."""
+        import mmap
+        self._fb_file = open(self._fb, "r+b")
+        self._fb_mmap = mmap.mmap(self._fb_file.fileno(), self.W * self.H * 2)
+
     def _flush_to_fb(self) -> None:
-        """Convert pygame surface to RGB565 and write to framebuffer."""
+        """Convert pygame surface to RGB565 and blit to framebuffer via mmap."""
         try:
             import numpy as np
             arr = self._pg.surfarray.array3d(self._screen)  # (W, H, 3)
@@ -99,8 +107,8 @@ class FaceDisplay:
             rgb565 = ((arr[:, :, 0] & 0xF8) << 8) | \
                      ((arr[:, :, 1] & 0xFC) << 3) | \
                      (arr[:, :, 2] >> 3)
-            with open(self._fb, "wb") as f:
-                f.write(rgb565.tobytes())
+            self._fb_mmap.seek(0)
+            self._fb_mmap.write(rgb565.tobytes())
         except Exception as e:
             logger.debug(f"FB flush error: {e}")
 
@@ -153,6 +161,8 @@ class FaceDisplay:
 
     def _render_loop(self) -> None:
         pg = self._pg
+        if not self._mock and self._fb:
+            self._open_fb()
         t = 0.0
         blink_next = random.uniform(2.0, 5.0)
         blink_start = 0.0
