@@ -40,11 +40,13 @@ _FAR_COL   = (60,  220, 100)   # > 1500 mm
 
 
 class FaceDisplay:
-    W  = 320
-    H  = 480
-    HH = 240   # half-height split
+    # Physical display: 480×320 landscape.
+    # Split: left half = face (240×320), right half = radar (240×320)
+    W  = 480
+    H  = 320
+    HH = 240   # half-width split (face | radar)
 
-    def __init__(self, fb_device: str = "/dev/fb1", rotation: int = 0,
+    def __init__(self, fb_device: str = "/dev/fb0", rotation: int = 0,
                  mock: bool = False):
         self._fb       = fb_device
         self._rotation = rotation
@@ -167,16 +169,16 @@ class FaceDisplay:
             if state == "speaking":
                 mouth_phase += dt * 8.0
 
-            # --- TOP: face ---
-            face_surf = scr.subsurface((0, 0, self.W, self.HH))
+            # --- LEFT: face (0..HH × 0..H) ---
+            face_surf = scr.subsurface((0, 0, self.HH, self.H))
             face_surf.fill(BG)
             self._draw_face(face_surf, pg, state, blink_ratio, t, mouth_phase)
 
             # divider
-            pg.draw.line(scr, GRID, (0, self.HH), (self.W, self.HH), 1)
+            pg.draw.line(scr, GRID, (self.HH, 0), (self.HH, self.H), 1)
 
-            # --- BOTTOM: radar ---
-            radar_surf = scr.subsurface((0, self.HH, self.W, self.HH))
+            # --- RIGHT: radar (HH..W × 0..H) ---
+            radar_surf = scr.subsurface((self.HH, 0, self.W - self.HH, self.H))
             radar_surf.fill(BG_RADAR)
             with self._scan_lock:
                 scan = dict(self._scan)
@@ -189,7 +191,9 @@ class FaceDisplay:
     # ------------------------------------------------------------------
 
     def _draw_radar(self, surf, pg, scan: dict, t: float) -> None:
-        cx, cy = self.W // 2, self.HH // 2
+        # radar panel is (W-HH) × H = 240 × 320
+        panel_w = self.W - self.HH
+        cx, cy = panel_w // 2, self.H // 2
         max_r = 105    # px  — represents MAX_DIST_MM
         MAX_DIST = 3500.0
 
@@ -247,8 +251,9 @@ class FaceDisplay:
     # ------------------------------------------------------------------
 
     def _draw_face(self, surf, pg, state, blink_ratio, t, mouth_phase):
-        cx   = self.W // 2
-        eye_y = self.HH // 2 - 20
+        # face panel: HH × H = 240 × 320
+        cx    = self.HH // 2       # 120
+        eye_y = self.H  // 2 - 20  # 140
         eye_gap = 68
         lx, rx = cx - eye_gap, cx + eye_gap
 
@@ -282,12 +287,12 @@ class FaceDisplay:
         elif state in ("happy", "surprised"):
             self._mouth_smile(surf, pg, cx, eye_y + 95, state)
 
-        # state label (small, bottom of face area)
+        # state label (small, bottom of face panel)
         try:
             font = pg.font.SysFont("monospace", 11)
             lbl  = font.render(state.upper(), True, DIM)
-            surf.blit(lbl, (self.W // 2 - lbl.get_width() // 2,
-                            self.HH - 18))
+            surf.blit(lbl, (self.HH // 2 - lbl.get_width() // 2,
+                            self.H - 18))
         except Exception:
             pass
 

@@ -45,7 +45,7 @@ class RoverComponents:
 def create_all() -> RoverComponents:
     from config import (
         MOTOR_SERIAL_PORT, MOTOR_BAUDRATE,
-        LIDAR_PORT, LIDAR_BAUDRATE, DISPLAY_ROTATION,
+        LIDAR_PORT, LIDAR_BAUDRATE, DISPLAY_ROTATION, DISPLAY_FB,
         PIPER_VOICE, PIPER_SPEED,
         WHISPER_MODEL, WHISPER_LANGUAGE, MIC_DEVICE_INDEX,
         BT_SPEAKER_MAC, BT_RECONNECT_INTERVAL,
@@ -89,7 +89,7 @@ def create_all() -> RoverComponents:
 
         c.motors       = Motors()
         c.lidar        = Lidar(port=LIDAR_PORT, baudrate=LIDAR_BAUDRATE)
-        c.display      = FaceDisplay(rotation=DISPLAY_ROTATION)
+        c.display      = FaceDisplay(fb_device=DISPLAY_FB, rotation=DISPLAY_ROTATION)
         c.tts          = TTS(voice=PIPER_VOICE, speed=PIPER_SPEED)
         c.stt          = STT(model_size=WHISPER_MODEL,
                              language=WHISPER_LANGUAGE,

@@ -1,5 +1,15 @@
 import os
 
+# Load .env from project root if present
+_env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+if os.path.isfile(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # --- Robot identity ---
 ROBOT_NAME = "Ровер"
 ROBOT_PERSONALITY = (
@@ -29,20 +39,21 @@ PIPER_VOICE = os.getenv("PIPER_VOICE", "ru_RU-ruslan-medium")
 PIPER_SPEED = 1.0
 
 # --- Motors ---
-MOTOR_SERIAL_PORT = "/dev/ttyUSB0"
+MOTOR_SERIAL_PORT = "/dev/ttyUSB1"   # CP2102 #1 — motor controller
 MOTOR_BAUDRATE = 38400
 MOTOR_DEAD_ZONE = 10
-MOTOR_CONTROL_HZ = 10        # тиков в секунду в управляющем цикле
+MOTOR_CONTROL_HZ = 10
 
 # --- Lidar ---
-LIDAR_PORT = "/dev/ttyUSB1"  # уточнить после ls /dev/ttyUSB*
+LIDAR_PORT = "/dev/ttyUSB0"          # CP2102 #0 — YDLIDAR X4-Pro
 LIDAR_BAUDRATE = 128000
-OBSTACLE_DISTANCE_CM = 30    # ближе = препятствие
+OBSTACLE_DISTANCE_CM = 30
 
 # --- Display ---
-DISPLAY_WIDTH = 320
-DISPLAY_HEIGHT = 480
-DISPLAY_ROTATION = 90        # градусов
+# Physical display: 480×320 landscape, RGB565, /dev/fb0
+DISPLAY_WIDTH  = 480
+DISPLAY_HEIGHT = 320
+DISPLAY_FB     = os.getenv("DISPLAY_FB", "/dev/fb0")
 
 # --- Bluetooth speaker ---
 BT_SPEAKER_MAC = os.getenv("BT_SPEAKER_MAC", "")   # "XX:XX:XX:XX:XX:XX"
