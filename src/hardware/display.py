@@ -232,6 +232,10 @@ class FaceDisplay:
             radar_surf.fill(BG_RADAR)
             with self._scan_lock:
                 scan = dict(self._scan)
+            if scan and int(t) % 5 == 0 and int(t) != getattr(self, '_last_scan_log', -1):
+                vals = list(scan.values())
+                logger.info(f"Radar: {len(scan)} pts, range {min(vals):.0f}–{max(vals):.0f} mm")
+                self._last_scan_log = int(t)
             self._draw_radar(radar_surf, pg, scan, t)
 
             if self._mock:
