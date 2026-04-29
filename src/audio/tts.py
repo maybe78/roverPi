@@ -21,12 +21,13 @@ class TTS:
         self._lock = threading.Lock()
 
     def _detect_engine(self) -> str:
+        # RHVoice first — confirmed working on this Pi with 'alexander' voice
+        if shutil.which("RHVoice-test"):
+            logger.info("TTS engine: RHVoice (alexander)")
+            return "rhvoice"
         if shutil.which("piper"):
             logger.info("TTS engine: piper")
             return "piper"
-        if shutil.which("RHVoice-test"):
-            logger.info("TTS engine: RHVoice")
-            return "rhvoice"
         if shutil.which("espeak-ng"):
             logger.info("TTS engine: espeak-ng (fallback)")
             return "espeak"
@@ -75,10 +76,12 @@ class TTS:
         subprocess.run(cmd, shell=True, timeout=30)
 
     def _rhvoice(self, text: str) -> None:
+        # Same command confirmed working on this Pi
         subprocess.run(
             ["bash", "-c", f'echo "{text}" | RHVoice-test -p alexander'],
             timeout=30,
         )
+
 
     def _espeak(self, text: str) -> None:
         subprocess.run(
