@@ -67,18 +67,25 @@ class FaceDisplay:
             import pygame as pg
             os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
             if not self._mock:
-                # SDL2 on modern Pi OS doesn't have fbdev compiled in.
-                # Use offscreen driver and blit raw RGB565 to /dev/fb0 each frame.
-                os.environ["SDL_VIDEODRIVER"] = "offscreen"
+                # SDL2 on Pi OS doesn't have fbdev; offscreen uses EGL which
+                # crashes over SSH. Use dummy driver — pure software surface,
+                # then blit raw RGB565 bytes to /dev/fb0 each frame.
+                os.environ["SDL_VIDEODRIVER"] = "dummy"
                 os.environ["SDL_NOMOUSE"] = "1"
             pg.display.init()
             pg.font.init()
-            self._screen = pg.display.set_mode((self.W, self.H))
-            pg.display.set_caption("Rover" + (" [MOCK]" if self._mock else ""))
+            if self._mock:
+                self._screen = pg.display.set_mode((self.W, self.H))
+                pg.display.set_caption("Rover [MOCK]")
+            else:
+                # Minimal display window (1×1) so fonts/timers work;
+                # actual drawing goes to a plain Surface → /dev/fb0.
+                pg.display.set_mode((1, 1), pg.NOFRAME)
+                self._screen = pg.Surface((self.W, self.H))
             self._clock = pg.time.Clock()
             self._pg = pg
             self._pygame_ok = True
-            mode = "desktop" if self._mock else f"{self._fb} (offscreen→fb)"
+            mode = "desktop" if self._mock else f"{self._fb} (dummy→fb)"
             logger.info(f"Display ready {self.W}×{self.H} → {mode}")
         except Exception as e:
             logger.warning(f"Display unavailable: {e}")
@@ -156,9 +163,10 @@ class FaceDisplay:
             dt = self._clock.tick(30) / 1000.0
             t += dt
 
-            for ev in pg.event.get():
-                if ev.type == pg.QUIT:
-                    self._running = False
+            if self._mock:
+                for ev in pg.event.get():
+                    if ev.type == pg.QUIT:
+                        self._running = False
 
             state = self._state
             scr = self._screen
@@ -197,8 +205,9 @@ class FaceDisplay:
                 scan = dict(self._scan)
             self._draw_radar(radar_surf, pg, scan, t)
 
-            pg.display.flip()
-            if not self._mock and self._fb:
+            if self._mock:
+                pg.display.flip()
+            elif self._fb:
                 self._flush_to_fb()
 
     # ------------------------------------------------------------------
