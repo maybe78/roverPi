@@ -65,13 +65,12 @@ class FaceDisplay:
     def _init_pygame(self) -> None:
         try:
             import pygame as pg
-            if not self._mock:
-                os.environ.setdefault("SDL_VIDEODRIVER", "fbdev")
-                os.environ.setdefault("SDL_FBDEV", self._fb)
-                os.environ["SDL_NOMOUSE"] = "1"
-            # Init only display + font — do NOT call pg.init() which also
-            # inits the mixer and grabs the audio device, conflicting with sounddevice
             os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+            if not self._mock:
+                # SDL2 on modern Pi OS doesn't have fbdev compiled in.
+                # Use offscreen driver and blit raw RGB565 to /dev/fb0 each frame.
+                os.environ["SDL_VIDEODRIVER"] = "offscreen"
+                os.environ["SDL_NOMOUSE"] = "1"
             pg.display.init()
             pg.font.init()
             self._screen = pg.display.set_mode((self.W, self.H))
@@ -79,10 +78,24 @@ class FaceDisplay:
             self._clock = pg.time.Clock()
             self._pg = pg
             self._pygame_ok = True
-            mode = "desktop" if self._mock else self._fb
+            mode = "desktop" if self._mock else f"{self._fb} (offscreen→fb)"
             logger.info(f"Display ready {self.W}×{self.H} → {mode}")
         except Exception as e:
             logger.warning(f"Display unavailable: {e}")
+
+    def _flush_to_fb(self) -> None:
+        """Convert pygame surface to RGB565 and write to framebuffer."""
+        try:
+            import numpy as np
+            arr = self._pg.surfarray.array3d(self._screen)  # (W, H, 3)
+            arr = np.transpose(arr, (1, 0, 2)).astype(np.uint16)  # (H, W, 3)
+            rgb565 = ((arr[:, :, 0] & 0xF8) << 8) | \
+                     ((arr[:, :, 1] & 0xFC) << 3) | \
+                     (arr[:, :, 2] >> 3)
+            with open(self._fb, "wb") as f:
+                f.write(rgb565.tobytes())
+        except Exception as e:
+            logger.debug(f"FB flush error: {e}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -185,6 +198,8 @@ class FaceDisplay:
             self._draw_radar(radar_surf, pg, scan, t)
 
             pg.display.flip()
+            if not self._mock and self._fb:
+                self._flush_to_fb()
 
     # ------------------------------------------------------------------
     # RADAR

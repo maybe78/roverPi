@@ -39,13 +39,13 @@ PIPER_VOICE = os.getenv("PIPER_VOICE", "ru_RU-ruslan-medium")
 PIPER_SPEED = 1.0
 
 # --- Motors ---
-MOTOR_SERIAL_PORT = "/dev/ttyUSB1"   # CP2102 #1 — motor controller
+MOTOR_SERIAL_PORT = os.getenv("MOTOR_PORT", "/dev/ttyUSB2")
 MOTOR_BAUDRATE = 38400
 MOTOR_DEAD_ZONE = 10
 MOTOR_CONTROL_HZ = 10
 
 # --- Lidar ---
-LIDAR_PORT = "/dev/ttyUSB0"          # CP2102 #0 — YDLIDAR X4-Pro
+LIDAR_PORT = os.getenv("LIDAR_PORT", "/dev/ttyUSB1")   # YDLIDAR X4-Pro
 LIDAR_BAUDRATE = 128000
 OBSTACLE_DISTANCE_CM = 30
 
