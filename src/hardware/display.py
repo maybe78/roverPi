@@ -38,9 +38,11 @@ class FaceDisplay:
     W = 320
     H = 480
 
-    def __init__(self, fb_device: str = "/dev/fb1", rotation: int = 0):
+    def __init__(self, fb_device: str = "/dev/fb1", rotation: int = 0,
+                 mock: bool = False):
         self._fb = fb_device
         self._rotation = rotation
+        self._mock = mock
         self._state = "idle"
         self._prev_state = None
         self._running = False
@@ -53,18 +55,21 @@ class FaceDisplay:
     def _init_pygame(self) -> None:
         try:
             import pygame
-            os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
-            os.environ.setdefault("SDL_FBDEV", self._fb)
-            os.environ["SDL_NOMOUSE"] = "1"
+            if not self._mock:
+                # Real hardware: render to framebuffer
+                os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
+                os.environ.setdefault("SDL_FBDEV", self._fb)
+                os.environ["SDL_NOMOUSE"] = "1"
+            # Mock / desktop: let pygame use the default windowed driver
             pygame.init()
-            self._screen = pygame.display.set_mode(
-                (self.W, self.H), flags=0
-            )
-            pygame.display.set_caption("Rover Face")
+            flags = 0 if self._mock else 0
+            self._screen = pygame.display.set_mode((self.W, self.H), flags)
+            pygame.display.set_caption("Rover Face" + (" [MOCK]" if self._mock else ""))
             self._clock = pygame.time.Clock()
             self._pygame = pygame
             self._pygame_ok = True
-            logger.info(f"Display ready ({self.W}×{self.H}) on {self._fb}")
+            mode = "desktop window" if self._mock else self._fb
+            logger.info(f"Display ready ({self.W}×{self.H}) → {mode}")
         except Exception as e:
             logger.warning(f"Display unavailable: {e}")
 
