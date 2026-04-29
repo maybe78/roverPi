@@ -1,9 +1,28 @@
+# Existing
 pyserial
 evdev
 pyudev
 opencv-python-headless
 flask
 flask-socketio
+psutil
+
+# Agent / LLM
+ollama
+
+# STT
+faster-whisper
+sounddevice
+
+# TTS (piper installed separately as binary + model)
+# piper-tts         # uncomment if using pip install, else use binary
+
+# Audio
+pygame
+
+# Web / async
 aiortc
 aiohttp
-psutil
+
+# Telegram
+requests
