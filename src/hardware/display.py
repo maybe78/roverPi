@@ -67,7 +67,11 @@ class FaceDisplay:
                 os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
                 os.environ.setdefault("SDL_FBDEV", self._fb)
                 os.environ["SDL_NOMOUSE"] = "1"
-            pg.init()
+            # Init only display + font — do NOT call pg.init() which also
+            # inits the mixer and grabs the audio device, conflicting with sounddevice
+            os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+            pg.display.init()
+            pg.font.init()
             self._screen = pg.display.set_mode((self.W, self.H))
             pg.display.set_caption("Rover" + (" [MOCK]" if self._mock else ""))
             self._clock = pg.time.Clock()
@@ -103,7 +107,7 @@ class FaceDisplay:
         self._running = False
         if self._pygame_ok:
             try:
-                self._pg.quit()
+                self._pg.display.quit()
             except Exception:
                 pass
 
