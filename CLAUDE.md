@@ -4,84 +4,129 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RoverPi is a Raspberry Pi-based all-terrain robot controlled via Bluetooth gamepad (DualShock 4 / 8BitDo) or a browser-based virtual joystick, with live video over WebRTC. It runs as a `systemd` service on Raspberry Pi OS (Bookworm, arm64).
+RoverPi is a Raspberry Pi 5 (8 GB) based autonomous robot-pet. It moves, sees, hears, speaks, and makes decisions using an on-device LLM. Controlled via browser (mobile) or voice commands.
 
-Hardware: Wild Thumper 4WD chassis, Pololu Qik 2s12v10 motor controller (serial `/dev/ttyUSB0` at 38400 baud), UVC USB camera (`/dev/video0`).
+**Hardware:**
+- Wild Thumper 4WD chassis, Pololu Qik 2s12v10 motor controller (`/dev/ttyUSB1`, 38400 baud)
+- YDLIDAR X4-Pro (`/dev/ttyUSB0`, 128000 baud)
+- USB webcam with microphone (`/dev/video0`)
+- SPI color display 480×320 landscape, RGB565 (`/dev/fb0`)
+- Bluetooth speaker H-PS1000 (MAC `41:42:E0:C6:CC:DB`)
+- Bluetooth gamepad 8BitDo NES30 Pro
 
-## Running the Application
+## Running
 
-On the Raspberry Pi, the service is started via systemd:
+**On Pi (hardware mode):**
 ```bash
-sudo systemctl start rover.service   # starts start_all.sh
-sudo systemctl status rover.service
-journalctl -u rover.service -f        # live logs
-```
-
-Manual start (for development):
-```bash
+cd /home/volodya/roverPi
 source venv/bin/activate
-cd src
-python main.py
+python src/main.py
 ```
 
-`start_all.sh` launches two processes:
-1. `/home/volodya/pi-webrtc` — external binary for WebRTC video (WHEP, port 8080)
-2. `python src/main.py` — Flask/Socket.IO control server (port 5000)
+**Local development (mock mode — auto-detected on non-Linux):**
+```bash
+source myenv/bin/activate
+MOCK=1 python src/main.py   # or just: python src/main.py  (on macOS)
+```
 
-## Development Setup
+Mock opens a pygame desktop window (face + radar), uses macOS `say` for TTS, real Whisper mic input or stdin fallback.
+
+**Systemd service:**
+```bash
+sudo systemctl start rover.service
+journalctl -u rover.service -f
+```
+
+## Prerequisites on Pi
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# LLM
+ollama serve &
+ollama pull qwen2.5:3b
+
+# TTS — RHVoice already installed, voice: alexander
+# STT — faster-whisper installed in venv
+
+# Config
+cat /home/volodya/roverPi/.env   # TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BT_SPEAKER_MAC etc.
 ```
 
-Linting (configured via `.pylintrc`):
-```bash
-pylint src/
+## Architecture (branch: `autonomous`)
+
+```
+src/
+├── main.py          — entry point; wires everything, starts Flask + threads
+├── config.py        — all settings; reads from .env in project root
+├── factory.py       — creates real or mock components based on IS_MOCK flag
+│
+├── agent/
+│   ├── agent.py     — RoverAgent: ollama tool-calling loop, sliding history window
+│   └── tools.py     — tool registry (move, scan, capture_photo, send_notification,
+│                       set_expression, read/modify_source_file, restart_service)
+│
+├── hardware/
+│   ├── motors.py    — wrapper over qik.py with graceful degradation
+│   ├── lidar.py     — YDLIDAR X4-Pro; get_full_scan() → {angle: mm}
+│   └── display.py   — pygame face animation + lidar radar; 480×320 landscape split:
+│                       left 240px = face, right 240px = radar
+├── audio/
+│   ├── stt.py       — faster-whisper on mic, VAD, sends text to agent queue
+│   ├── tts.py       — RHVoice (primary) → piper → espeak-ng fallback chain
+│   ├── bluetooth.py — BT speaker auto-reconnect daemon
+│   └── player.py    — pygame MP3 player
+│
+├── mocks/           — drop-in replacements for all hardware (no Pi needed)
+│   ├── motors.py    — logs with direction arrows, only on state change
+│   ├── lidar.py     — simulates a 7×8 m room + moving obstacle
+│   ├── audio.py     — MockTTS (macOS say), MockSTT (real Whisper or stdin)
+│   └── telegram.py  — prints to console instead of sending
+│
+├── services/
+│   └── telegram.py  — Telegram Bot API: send text, photo, capture+send
+│
+└── vision/          — placeholder for object detector (OpenCV, from telegram branch)
 ```
 
-There are no automated tests. `src/MotorTest.py` and `src/OpenCVTest.py` are manual hardware test scripts.
+## Agent Tool Calling Flow
 
-## Architecture
+```
+voice/text input → STT → agent.submit(text)
+  → display: "thinking"
+  → ollama.chat(qwen2.5:3b, history, tools)
+  → if tool_calls: execute → append results → loop (max 8 rounds)
+  → final text response → display: "speaking" → TTS → display: "idle"
+```
 
-### Control Flow (priority order in `main.py`)
+**Available tools:** `move`, `stop`, `scan_surroundings`, `capture_photo`, `get_status`, `send_notification`, `set_expression`, `read_source_file`, `modify_source_file`, `restart_service`
 
-The motor control loop runs in a background thread (`motor_control_loop`). On each 100ms tick:
-1. **Gamepad (priority 1):** If a DualShock/8BitDo is connected via Bluetooth (`evdev`), its left stick axes drive the motors.
-2. **Web interface (priority 2):** If no gamepad, uses the latest command from `WebCommands` (expires after 500ms).
-3. **Stop:** If neither source has a valid command, motors are halted.
+**Note:** `speak()` is NOT a tool — final LLM text response is always auto-spoken. This prevents double TTS.
 
-Joystick values are translated to differential (tank) drive by `utils.joystick_to_diff_control()`, which applies dead zone, exponential curve, and left/right mixing.
+## Display Layout
 
-### Two Separate Backend Services
+```
+┌────────────┬────────────┐
+│            │   RADAR    │  480×320 landscape (/dev/fb0, RGB565)
+│    FACE    │  (lidar    │
+│ (240×320)  │  top-down) │  Left: pygame face animation (240×320)
+│            │  240×320   │  Right: 360° lidar point cloud, robot arrow at center
+└────────────┴────────────┘
+```
 
-| Service | File | Port | Protocol |
-|---|---|---|---|
-| Motor control + web UI | `src/main.py` | 5000 | Flask + Socket.IO |
-| Video stream | `/home/volodya/pi-webrtc` (external binary) | 8080 | WebRTC WHEP |
+Face states: `idle`, `listening`, `thinking`, `speaking`, `happy`, `surprised`, `angry`, `sad`
 
-The browser (`src/static/js/main.js`) connects to **both**: Socket.IO on port 5000 for joystick commands, and HTTP POST to `http://192.168.0.38:8080` for the WebRTC SDP handshake. The rover IP is hardcoded in `main.js`.
+## Key Config Values (Pi)
 
-### Key Modules
+| Setting | Value |
+|---|---|
+| Lidar port | `/dev/ttyUSB0` |
+| Motor port | `/dev/ttyUSB1` |
+| Display fb | `/dev/fb0` |
+| Display size | 480×320 |
+| TTS engine | RHVoice `alexander` voice |
+| LLM | `qwen2.5:3b` via ollama |
+| STT | `faster-whisper` base model |
+| BT speaker | H-PS1000, `41:42:E0:C6:CC:DB` |
 
-- **`src/main.py`** — Entry point. Owns the Flask app, Socket.IO server, motor control thread, and gamepad reconnect logic.
-- **`src/qik.py`** — Serial driver for the Pololu Qik 2s12v10. Speed range is −127 to +127. Motor 0 = left side, Motor 1 = right side.
-- **`src/dualshock4.py`** — `evdev`-based gamepad reader. Searches for devices named "Wireless Controller" or "8Bitdo". Handles disconnect/reconnect gracefully.
-- **`src/utils.py`** — Pure math: dead zone, exponential curve (`CURVE_EXPONENT=1.6`), arcade-to-differential mixing.
-- **`src/web_commands.py`** — Thread-safe shared state (`threading.Lock`) between the Socket.IO handler and the motor thread.
-- **`src/webrtc_handler.py`** — An alternative `aiortc`-based WebRTC implementation (not used in the current `main.py`; kept for reference).
-- **`src/app.py`** — An earlier, simpler version of the Flask app (not the active entry point).
+## macOS / Pi Threading Difference
 
-### Web Frontend
-
-- `src/templates/index.html` — Single-page UI with virtual joystick and WebRTC video element.
-- `src/static/js/joystick.js` — Canvas joystick widget.
-- `src/static/js/main.js` — Socket.IO control logic (throttled to 50ms) and WebRTC SDP negotiation.
-
-## Important Notes
-
-- The `venv/` directory is at the project root; `start_all.sh` references `/home/volodya/roverPi/venv/bin/python`.
-- The `pi-webrtc` binary must be present at `/home/volodya/pi-webrtc` (downloaded separately, not in this repo).
-- Serial port `/dev/ttyUSB0` must be accessible; the Qik controller requires Serial Port hardware enabled in `raspi-config` with login shell over serial **disabled**.
-- The `rover.service` runs as user `volodya` with `WorkingDirectory=/home/volodya/roverPi/src`.
+macOS Cocoa requires pygame on the **main thread**. On macOS mock mode: Flask runs in a daemon thread, pygame blocks main thread. On Pi: pygame in background thread, Flask on main thread. Controlled by `display.needs_main_thread` property.
