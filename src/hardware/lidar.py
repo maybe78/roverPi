@@ -1,7 +1,10 @@
 """
 YDLIDAR X4-Pro driver wrapper.
 
-Returns sector distances used by the agent's scan_surroundings() tool.
+Initialization runs in a background thread and retries indefinitely — the
+robot starts up immediately even if the lidar takes a few extra seconds to
+spin up.  Once running, the scan thread auto-reconnects on disconnect.
+
 Sectors: front (315–45°), right (45–135°), back (135–225°), left (225–315°).
 """
 
@@ -25,64 +28,93 @@ class Lidar:
         self._port = port
         self._baudrate = baudrate
         self._laser = None
-        self._scan: dict[int, float] = {}   # angle → distance_mm
+        self._scan: dict[int, float] = {}
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._running = False
-        self._connect()
+        self._start_bg_thread()
 
-    def _connect(self) -> None:
-        try:
-            import ydlidar, time
-            # os_init() omitted intentionally — matches legacy/lidar.py which worked
-            self._laser = ydlidar.CYdLidar()
-            self._laser.setlidaropt(ydlidar.LidarPropSerialPort, self._port)
-            self._laser.setlidaropt(ydlidar.LidarPropSerialBaudrate, self._baudrate)
-            self._laser.setlidaropt(ydlidar.LidarPropLidarType, ydlidar.TYPE_TRIANGLE)
-            self._laser.setlidaropt(ydlidar.LidarPropDeviceType, ydlidar.YDLIDAR_TYPE_SERIAL)
-            self._laser.setlidaropt(ydlidar.LidarPropScanFrequency, 6.0)
-            self._laser.setlidaropt(ydlidar.LidarPropSampleRate, 5)
-            self._laser.setlidaropt(ydlidar.LidarPropSingleChannel, True)
-            if not self._laser.initialize():
-                raise RuntimeError("Lidar initialize() failed")
-            # Motor needs time to spin up — retry turnOn() with backoff
-            for attempt in range(1, 4):
-                if self._laser.turnOn():
-                    break
-                logger.warning(f"Lidar turnOn attempt {attempt}/3 failed, waiting 3s...")
-                time.sleep(3.0)
-            else:
-                raise RuntimeError("Lidar turnOn() failed after 3 attempts")
-            logger.info(f"YDLIDAR ready on {self._port}")
-            self._start_scan_thread()
-        except ImportError:
-            logger.warning("ydlidar SDK not installed — lidar disabled")
-        except Exception as e:
-            logger.error(f"Lidar init failed: {e}")
-            self._laser = None
-
-    def _start_scan_thread(self) -> None:
+    def _start_bg_thread(self) -> None:
         self._running = True
         self._thread = threading.Thread(
-            target=self._scan_loop, daemon=True, name="LidarThread"
+            target=self._lidar_loop, daemon=True, name="LidarThread"
         )
         self._thread.start()
 
-    def _scan_loop(self) -> None:
-        import ydlidar
-        scan = ydlidar.LaserScan()
-        while self._running and self._laser:
+    def _lidar_loop(self) -> None:
+        """Background loop: init → scan → reconnect on error."""
+        import ydlidar, time
+        attempt = 0
+
+        while self._running:
+            attempt += 1
+            laser = None
+
+            # --- initialise ---
             try:
-                if self._laser.doProcessSimple(scan):
-                    data = {}
-                    for point in scan.points:
-                        angle_deg = math.degrees(point.angle) % 360
-                        if point.range > 0:
-                            data[int(angle_deg)] = point.range * 1000  # → mm
-                    with self._lock:
-                        self._scan = data
+                laser = ydlidar.CYdLidar()
+                laser.setlidaropt(ydlidar.LidarPropSerialPort, self._port)
+                laser.setlidaropt(ydlidar.LidarPropSerialBaudrate, self._baudrate)
+                laser.setlidaropt(ydlidar.LidarPropLidarType, ydlidar.TYPE_TRIANGLE)
+                laser.setlidaropt(ydlidar.LidarPropDeviceType, ydlidar.YDLIDAR_TYPE_SERIAL)
+                laser.setlidaropt(ydlidar.LidarPropScanFrequency, 6.0)
+                laser.setlidaropt(ydlidar.LidarPropSampleRate, 5)
+                laser.setlidaropt(ydlidar.LidarPropSingleChannel, True)
+
+                if not laser.initialize():
+                    logger.warning(f"Lidar initialize() failed (attempt {attempt}), retry in 5s")
+                    time.sleep(5)
+                    continue
+
+                if not laser.turnOn():
+                    logger.warning(f"Lidar turnOn() failed (attempt {attempt}), retry in 5s")
+                    try:
+                        laser.disconnecting()
+                    except Exception:
+                        pass
+                    time.sleep(5)
+                    continue
+
+            except ImportError:
+                logger.warning("ydlidar SDK not installed — lidar disabled")
+                return
             except Exception as e:
-                logger.error(f"Lidar scan error: {e}")
+                logger.error(f"Lidar init error (attempt {attempt}): {e}, retry in 5s")
+                time.sleep(5)
+                continue
+
+            logger.info(f"YDLIDAR ready on {self._port} (attempt {attempt})")
+            with self._lock:
+                self._laser = laser
+
+            # --- scan ---
+            scan_obj = ydlidar.LaserScan()
+            while self._running:
+                try:
+                    if laser.doProcessSimple(scan_obj):
+                        data = {}
+                        for point in scan_obj.points:
+                            angle_deg = math.degrees(point.angle) % 360
+                            if point.range > 0:
+                                data[int(angle_deg)] = point.range * 1000  # m → mm
+                        with self._lock:
+                            self._scan = data
+                except Exception as e:
+                    logger.error(f"Lidar scan error: {e}")
+                    break
+
+            # scan loop exited — disconnect and retry
+            with self._lock:
+                self._laser = None
+            try:
+                laser.turnOff()
+                laser.disconnecting()
+            except Exception:
+                pass
+
+            if self._running:
+                logger.info("Lidar disconnected, reconnecting in 3s...")
+                time.sleep(3)
 
     # ------------------------------------------------------------------
     # Public API
@@ -93,7 +125,7 @@ class Lidar:
         return self._laser is not None
 
     def get_full_scan(self) -> dict:
-        """Return full 360° scan {angle_deg: distance_mm}."""
+        """Return latest 360° scan {angle_deg: distance_mm}."""
         with self._lock:
             return dict(self._scan)
 
@@ -106,7 +138,7 @@ class Lidar:
         for sector, (start, end) in SECTORS.items():
             distances = []
             for angle, dist in scan.items():
-                if start > end:          # wraps around 0 (e.g. front: 315–45)
+                if start > end:
                     if angle >= start or angle <= end:
                         distances.append(dist)
                 else:
@@ -130,9 +162,14 @@ class Lidar:
 
     def stop(self) -> None:
         self._running = False
-        if self._laser:
+        with self._lock:
+            laser = self._laser
+            self._laser = None
+        if laser:
             try:
-                self._laser.turnOff()
-                self._laser.disconnecting()
+                laser.turnOff()
+                laser.disconnecting()
             except Exception:
                 pass
+        if self._thread:
+            self._thread.join(timeout=5.0)
