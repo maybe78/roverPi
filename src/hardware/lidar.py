@@ -58,8 +58,9 @@ class Lidar:
                 laser.setlidaropt(ydlidar.LidarPropLidarType, ydlidar.TYPE_TRIANGLE)
                 laser.setlidaropt(ydlidar.LidarPropDeviceType, ydlidar.YDLIDAR_TYPE_SERIAL)
                 laser.setlidaropt(ydlidar.LidarPropScanFrequency, 6.0)
-                laser.setlidaropt(ydlidar.LidarPropSampleRate, 5)
+                laser.setlidaropt(ydlidar.LidarPropSampleRate, 3)
                 laser.setlidaropt(ydlidar.LidarPropSingleChannel, True)
+                laser.setlidaropt(ydlidar.LidarPropIntensity, False)
 
                 if not laser.initialize():
                     logger.warning(f"Lidar initialize() failed (attempt {attempt}), retry in 5s")
