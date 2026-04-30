@@ -36,7 +36,6 @@ def main():
     # ------------------------------------------------------------------
     c = create_all()
 
-    c.display.start()
     c.display.set_state("idle")
     c.bt_speaker.start()
 
