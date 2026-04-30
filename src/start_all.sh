@@ -14,9 +14,8 @@ USB_SRC="alsa_input.usb-GeneralPlus_USB_Audio_Device-00.mono-fallback"
 
 # --- 1. Ollama ---
 echo "[1/4] Starting ollama..."
-if ! pgrep -x ollama > /dev/null; then
-    ollama serve >> $PROJECT_DIR/logs/ollama.log 2>&1 &
-fi
+pkill -x ollama 2>/dev/null; sleep 1
+ollama serve >> $PROJECT_DIR/logs/ollama.log 2>&1 &
 for i in $(seq 1 30); do
     if curl -sf http://localhost:11434 > /dev/null 2>&1; then
         echo "  ollama ready (${i}s)"
