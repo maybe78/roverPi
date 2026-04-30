@@ -30,7 +30,7 @@ AGENT_TOOL_TIMEOUT = 10.0    # секунд на выполнение одног
 # --- STT ---
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")   # tiny / base / small
 WHISPER_LANGUAGE = "ru"
-MIC_DEVICE_INDEX = None      # None = системный по умолчанию
+MIC_DEVICE_INDEX = "pulse"   # pulse = уважает pactl set-default-source (BT mic, AirPods и т.д.)
 SILENCE_THRESHOLD = 500      # амплитуда для определения тишины
 SILENCE_DURATION = 1.5       # секунд тишины для остановки записи
 
