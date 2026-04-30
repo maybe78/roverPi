@@ -72,6 +72,31 @@ def main():
     ).start()
 
     # ------------------------------------------------------------------
+    # Start pi-webrtc camera after lidar is up (avoid USB contention at boot)
+    # ------------------------------------------------------------------
+    if not IS_MOCK:
+        def start_webrtc():
+            import subprocess
+            # Wait until lidar has data or 60s timeout
+            for _ in range(60):
+                if c.lidar.available:
+                    break
+                sleep(1)
+            webrtc_cmd = [
+                "/home/volodya/pi-webrtc",
+                "--camera=v4l2:0", "--v4l2-format=h264",
+                "--fps=15", "--width=640", "--height=480",
+                "--use-whep", "--http-port=8080",
+                "--uid=rover-camera", "--no-audio", "--hw-accel",
+            ]
+            log_path = os.path.join(config.LOGS_DIR, "pi-webrtc.log")
+            with open(log_path, "a") as lf:
+                subprocess.Popen(webrtc_cmd, stdout=lf, stderr=lf)
+            logger.info("pi-webrtc started")
+
+        threading.Thread(target=start_webrtc, daemon=True, name="WebRTCThread").start()
+
+    # ------------------------------------------------------------------
     # Radar feed loop — pushes lidar scan to display at ~10 Hz
     # ------------------------------------------------------------------
     def radar_loop():

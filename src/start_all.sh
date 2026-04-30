@@ -39,29 +39,8 @@ else
     pactl set-default-source $USB_SRC 2>/dev/null && echo "  USB mic active" || echo "  no mic available"
 fi
 
-# --- 4. Camera + WebRTC ---
-echo "[4/4] Starting camera..."
-for i in $(seq 1 15); do
-    if ls /dev/video* > /dev/null 2>&1; then
-        echo "  camera found"
-        break
-    fi
-    echo "  waiting for camera... (${i}s)"
-    sleep 1
-done
-
-/home/volodya/pi-webrtc \
-    --camera=v4l2:0 \
-    --v4l2-format=h264 \
-    --fps=15 \
-    --width=640 \
-    --height=480 \
-    --use-whep \
-    --http-port=8080 \
-    --uid=rover-camera \
-    --no-audio \
-    --hw-accel >> $PROJECT_DIR/logs/pi-webrtc.log 2>&1 &
-sleep 2
+# --- 4. Camera + WebRTC (started AFTER rover initializes lidar) ---
+# pi-webrtc is now launched from main.py once lidar is up to avoid USB contention
 
 # --- 5. Main app ---
 echo "Starting rover..."
