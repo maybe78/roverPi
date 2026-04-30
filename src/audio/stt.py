@@ -15,6 +15,8 @@ SAMPLE_RATE = 16000
 CHUNK = 1024
 SILENCE_THRESHOLD = 500
 SILENCE_CHUNKS = int(1.5 * SAMPLE_RATE / CHUNK)  # ~1.5 sec of silence
+WAKE_WORD = "рома"
+WAKE_TIMEOUT = 10.0  # seconds to stay active after wake word
 
 
 class STT:
@@ -27,6 +29,8 @@ class STT:
         self._thread: Optional[threading.Thread] = None
         self._result_queue: queue.Queue[str] = queue.Queue()
         self._callback: Optional[Callable[[str], None]] = None
+        self._active = False
+        self._wake_timer: Optional[threading.Timer] = None
         self._load_model(model_size)
 
     def _load_model(self, model_size: str) -> None:
@@ -62,6 +66,13 @@ class STT:
 
     def stop(self) -> None:
         self._running = False
+        if self._wake_timer:
+            self._wake_timer.cancel()
+
+    def _deactivate(self) -> None:
+        self._active = False
+        self._wake_timer = None
+        logger.info("Wake word timeout — back to standby")
 
     # ------------------------------------------------------------------
 
@@ -122,9 +133,36 @@ class STT:
                 vad_filter=True,
             )
             text = " ".join(s.text.strip() for s in segments).strip()
-            if text:
-                logger.info(f"Heard: {text}")
+            if not text:
+                return
+
+            logger.info(f"Heard: {text}")
+            lower = text.lower()
+
+            if WAKE_WORD in lower:
+                if self._wake_timer:
+                    self._wake_timer.cancel()
+                idx = lower.find(WAKE_WORD)
+                command = text[idx + len(WAKE_WORD):].strip(" ,!?.")
+                if command:
+                    logger.info(f"Wake+command: {command}")
+                    if self._callback:
+                        self._callback(command)
+                else:
+                    self._active = True
+                    self._wake_timer = threading.Timer(WAKE_TIMEOUT, self._deactivate)
+                    self._wake_timer.daemon = True
+                    self._wake_timer.start()
+                    logger.info("Wake word heard — waiting for command...")
+            elif self._active:
+                self._active = False
+                if self._wake_timer:
+                    self._wake_timer.cancel()
+                    self._wake_timer = None
+                logger.info(f"Command: {text}")
                 if self._callback:
                     self._callback(text)
+            else:
+                logger.info("(standby)")
         except Exception as e:
             logger.error(f"Transcription error: {e}")
