@@ -110,6 +110,9 @@ class MockLidar:
     def clear_obstacles(self) -> None:
         self._forced.clear()
 
+    def start(self) -> None:
+        pass
+
     def stop(self) -> None:
         pass
 

@@ -36,6 +36,7 @@ def main():
     # ------------------------------------------------------------------
     c = create_all()
 
+    c.lidar.start()          # start AFTER factory so Whisper loads without GIL contention
     c.display.start()
     c.display.set_state("idle")
     c.bt_speaker.start()

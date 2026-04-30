@@ -32,9 +32,11 @@ class Lidar:
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._running = False
-        self._start_bg_thread()
 
-    def _start_bg_thread(self) -> None:
+    def start(self) -> None:
+        """Start background init+scan thread. Call after all other components are ready."""
+        if self._running:
+            return
         self._running = True
         self._thread = threading.Thread(
             target=self._lidar_loop, daemon=True, name="LidarThread"
