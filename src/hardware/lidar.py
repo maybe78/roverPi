@@ -33,8 +33,9 @@ class Lidar:
 
     def _connect(self) -> None:
         try:
-            import ydlidar
+            import ydlidar, time
             ydlidar.os_init()
+            time.sleep(0.5)  # let USB device settle after hotplug
             self._laser = ydlidar.CYdLidar()
             self._laser.setlidaropt(ydlidar.LidarPropSerialPort, self._port)
             self._laser.setlidaropt(ydlidar.LidarPropSerialBaudrate, self._baudrate)
@@ -43,15 +44,11 @@ class Lidar:
             self._laser.setlidaropt(ydlidar.LidarPropScanFrequency, 6.0)
             self._laser.setlidaropt(ydlidar.LidarPropSampleRate, 9)
             self._laser.setlidaropt(ydlidar.LidarPropSingleChannel, True)
-            self._laser.setlidaropt(ydlidar.LidarPropMaxAngle, 180.0)
-            self._laser.setlidaropt(ydlidar.LidarPropMinAngle, -180.0)
-            self._laser.setlidaropt(ydlidar.LidarPropMaxRange, 10.0)
-            self._laser.setlidaropt(ydlidar.LidarPropMinRange, 0.12)
             if not self._laser.initialize():
                 raise RuntimeError("Lidar initialize() failed")
             if not self._laser.turnOn():
                 raise RuntimeError("Lidar turnOn() failed")
-            logger.info(f"YDLIDAR X4-Pro ready on {self._port}")
+            logger.info(f"YDLIDAR ready on {self._port}")
             self._start_scan_thread()
         except ImportError:
             logger.warning("ydlidar SDK not installed — lidar disabled")
