@@ -151,6 +151,8 @@ class FaceDisplay:
         """Start render loop in a background thread (Linux/Pi only)."""
         if not self._pygame_ok or self.needs_main_thread:
             return
+        if self._running and self._thread and self._thread.is_alive():
+            return  # already running
         self._running = True
         self._thread = threading.Thread(
             target=self._render_loop, daemon=True, name="DisplayThread"

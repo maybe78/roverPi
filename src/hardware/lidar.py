@@ -105,6 +105,7 @@ class Lidar:
             # --- scan ---
             scan_obj = ydlidar.LaserScan()
             while self._running:
+                time.sleep(0)  # yield GIL so other Python threads can run
                 try:
                     if laser.doProcessSimple(scan_obj):
                         data = {}
