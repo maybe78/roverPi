@@ -1,42 +1,66 @@
 #!/bin/bash
 PROJECT_DIR=/home/volodya/roverPi
-
-# Создаем папку для логов, если ее нет
 mkdir -p $PROJECT_DIR/logs
 
-# --- 1. Запуск видеострима WebRTC ---
-echo "Starting WebRTC video stream with H.264 hardware acceleration..."
+BT_SPEAKER="41:42:E0:C6:CC:DB"
+AIRPODS="4C:B9:10:5D:82:C8"
+AIRPODS_SRC="bluez_input.4C_B9_10_5D_82_C8.0"
+USB_SRC="alsa_input.usb-GeneralPlus_USB_Audio_Device-00.mono-fallback"
 
-# Ждем, пока камера определится системой
-while [ ! -e /dev/video0 ]; do
-  echo "Waiting for camera (/dev/video0)..."
-  sleep 1 
+# --- 1. Ollama ---
+echo "[1/4] Starting ollama..."
+if ! pgrep -x ollama > /dev/null; then
+    ollama serve >> $PROJECT_DIR/logs/ollama.log 2>&1 &
+fi
+for i in $(seq 1 30); do
+    if curl -sf http://localhost:11434 > /dev/null 2>&1; then
+        echo "  ollama ready (${i}s)"
+        break
+    fi
+    sleep 1
 done
-echo "Camera found!"
 
-# Запускаем pi-webrtc в фоновом режиме (&)
-# и перенаправляем весь вывод в лог-файл
+# --- 2. Bluetooth speaker ---
+echo "[2/4] Connecting BT speaker..."
+bluetoothctl connect $BT_SPEAKER >> $PROJECT_DIR/logs/bt.log 2>&1 && echo "  speaker connected" || echo "  speaker not available"
+sleep 2
+
+# --- 3. Microphone ---
+echo "[3/4] Setting up microphone..."
+if bluetoothctl info $AIRPODS 2>/dev/null | grep -q "Connected: yes"; then
+    sleep 2
+    pactl set-default-source $AIRPODS_SRC 2>/dev/null && echo "  AirPods mic active" || echo "  AirPods mic not ready"
+else
+    pactl set-default-source $USB_SRC 2>/dev/null && echo "  USB mic active" || echo "  no mic available"
+fi
+
+# --- 4. Camera + WebRTC ---
+echo "[4/4] Starting camera..."
+for i in $(seq 1 15); do
+    if ls /dev/video* > /dev/null 2>&1; then
+        echo "  camera found"
+        break
+    fi
+    echo "  waiting for camera... (${i}s)"
+    sleep 1
+done
+
 /home/volodya/pi-webrtc \
-  --camera=v4l2:0 \
-  --v4l2-format=h264 \
-  --fps=15 \
-  --width=640 \
-  --height=480 \
-  --use-whep \
-  --http-port=8080 \
-  --uid=rover-camera \
-  --no-audio \
-  --hw-accel > $PROJECT_DIR/logs/pi-webrtc.log 2>&1 &
+    --camera=v4l2:0 \
+    --v4l2-format=h264 \
+    --fps=15 \
+    --width=640 \
+    --height=480 \
+    --use-whep \
+    --http-port=8080 \
+    --uid=rover-camera \
+    --no-audio \
+    --hw-accel >> $PROJECT_DIR/logs/pi-webrtc.log 2>&1 &
+sleep 2
 
-echo "WebRTC server started in background. Logs are in $PROJECT_DIR/logs/pi-webrtc.log"
-sleep 2 # Даем время серверу запуститься
+# --- 5. Main app ---
+echo "Starting rover..."
+exec $PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py
 
-# --- 2. Запуск основного приложения управления ---
-echo "Starting main control application..."
-$PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py
-
-# --- Очистка при завершении ---
-echo "Stopping background processes..."
-# Убиваем процесс pi-webrtc по имени при завершении скрипта
-killall pi-webrtc
-echo "All processes stopped."
+# Cleanup (exec above replaces shell, but leave for manual runs)
+killall pi-webrtc 2>/dev/null || true

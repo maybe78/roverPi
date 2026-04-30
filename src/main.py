@@ -52,9 +52,9 @@ def main():
     c.stt.start()
     c.agent.start()
 
-    # Greet on startup (give ollama 3s to wake up)
+    # Greet on startup (ollama already ready from start_all.sh)
     threading.Timer(
-        3.0,
+        1.0,
         lambda: c.agent.submit(
             "Ты только что включился. Поприветствуй хозяина одной короткой фразой."
         ),
