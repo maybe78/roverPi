@@ -2,6 +2,11 @@
 PROJECT_DIR=/home/volodya/roverPi
 mkdir -p $PROJECT_DIR/logs
 
+# PipeWire/PulseAudio сокеты — нужны когда запускаемся из systemd без сессии
+export XDG_RUNTIME_DIR=/run/user/1000
+export PULSE_SERVER=unix:/run/user/1000/pulse/native
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+
 BT_SPEAKER="41:42:E0:C6:CC:DB"
 AIRPODS="4C:B9:10:5D:82:C8"
 AIRPODS_SRC="bluez_input.4C_B9_10_5D_82_C8.0"
