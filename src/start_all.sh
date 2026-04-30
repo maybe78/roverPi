@@ -26,7 +26,8 @@ done
 
 # --- 2. Bluetooth speaker ---
 echo "[2/4] Connecting BT speaker..."
-bluetoothctl connect $BT_SPEAKER >> $PROJECT_DIR/logs/bt.log 2>&1 && echo "  speaker connected" || echo "  speaker not available"
+bluetoothctl connect $BT_SPEAKER >> $PROJECT_
+DIR/logs/bt.log 2>&1 && echo "  speaker connected" || echo "  speaker not available"
 sleep 2
 
 # --- 3. Microphone ---

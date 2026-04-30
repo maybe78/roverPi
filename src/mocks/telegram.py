@@ -1,4 +1,5 @@
 import logging
+import threading
 
 logger = logging.getLogger("mock.telegram")
 
@@ -6,6 +7,7 @@ logger = logging.getLogger("mock.telegram")
 class MockTelegram:
     def __init__(self, **kwargs):
         logger.info("MockTelegram: messages will be logged, not sent")
+        self._polling = False
 
     def send_text_message(self, text: str, **kwargs) -> dict:
         logger.info(f"Telegram → \"{text}\"")
@@ -25,3 +27,10 @@ class MockTelegram:
     def capture_and_send_photo(self, caption: str = None, **kwargs) -> dict:
         logger.info(f"Telegram capture+send | {caption}")
         return {"ok": True, "mock": True}
+
+    def start_polling(self, on_message) -> None:
+        self._polling = True
+        logger.info("MockTelegram: polling started (stdin not wired, use web UI or voice)")
+
+    def stop_polling(self) -> None:
+        self._polling = False

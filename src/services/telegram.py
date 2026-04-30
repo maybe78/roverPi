@@ -2,7 +2,9 @@ import cv2
 import requests
 import os
 import logging
-from typing import Optional
+import threading
+import time
+from typing import Optional, Callable
 from io import BytesIO
 from datetime import datetime
 
@@ -18,17 +20,12 @@ class TelegramBot:
     DEFAULT_CHAT_ID = "YOUR_CHAT_ID_HERE"  # ID вашего чата по умолчанию
     
     def __init__(self, bot_token: Optional[str] = None, default_chat_id: Optional[str] = None):
-        """
-        Инициализация бота
-        
-        Args:
-            bot_token (str, optional): Токен бота. Если не указан, используется константа класса
-            default_chat_id (str, optional): Chat ID по умолчанию. Если не указан, используется константа класса
-        """
         self.bot_token = bot_token or self.BOT_TOKEN
         self.default_chat_id = default_chat_id or self.DEFAULT_CHAT_ID
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
         self.logger = self._setup_logger()
+        self._polling = False
+        self._poll_thread: Optional[threading.Thread] = None
         
     def _setup_logger(self) -> logging.Logger:
         """Настройка логирования"""
@@ -253,6 +250,58 @@ class TelegramBot:
         except Exception as e:
             self.logger.error(f"Ошибка при отправке захваченного фото: {e}")
             return {"ok": False, "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Incoming message polling
+    # ------------------------------------------------------------------
+
+    def start_polling(self, on_message: Callable[[str], None]) -> None:
+        """Start long-polling for incoming text messages in a background thread."""
+        self._polling = True
+        self._poll_thread = threading.Thread(
+            target=self._poll_loop, args=(on_message,),
+            daemon=True, name="TelegramPollThread"
+        )
+        self._poll_thread.start()
+        self.logger.info("Telegram polling started")
+
+    def stop_polling(self) -> None:
+        self._polling = False
+
+    def _poll_loop(self, on_message: Callable[[str], None]) -> None:
+        offset = 0
+        while self._polling:
+            try:
+                resp = requests.get(
+                    f"{self.base_url}/getUpdates",
+                    params={"timeout": 30, "offset": offset},
+                    timeout=35,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if not data.get("ok"):
+                    time.sleep(5)
+                    continue
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    msg = update.get("message") or update.get("edited_message")
+                    if not msg:
+                        continue
+                    chat_id = str(msg.get("chat", {}).get("id", ""))
+                    if chat_id != str(self.default_chat_id):
+                        continue
+                    text = msg.get("text", "").strip()
+                    if text:
+                        self.logger.info(f"Telegram input: {text!r}")
+                        try:
+                            on_message(text)
+                        except Exception as e:
+                            self.logger.error(f"on_message error: {e}")
+            except requests.exceptions.Timeout:
+                continue
+            except Exception as e:
+                self.logger.error(f"Telegram poll error: {e}")
+                time.sleep(5)
 
 
 # Пример использования класса

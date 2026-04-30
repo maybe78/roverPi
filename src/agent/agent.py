@@ -32,10 +32,11 @@ logger = logging.getLogger("rover.agent")
 
 
 class RoverAgent:
-    def __init__(self, tool_registry: ToolRegistry, tts=None, display=None):
+    def __init__(self, tool_registry: ToolRegistry, tts=None, display=None, telegram=None):
         self.registry = tool_registry
         self.tts = tts
         self.display = display
+        self.telegram = telegram
 
         self.client = ollama.Client(host=OLLAMA_HOST)
         self.model = OLLAMA_MODEL
@@ -104,6 +105,11 @@ class RoverAgent:
                     self._set_display("speaking")
                     if self.tts:
                         self.tts.say(response)
+                    if self.telegram:
+                        try:
+                            self.telegram.send_text_message(response)
+                        except Exception as e:
+                            logger.warning(f"Telegram reply failed: {e}")
                     self._set_display("idle")
                     logger.info(f"Agent: {response[:120]}")
             except Exception as e:

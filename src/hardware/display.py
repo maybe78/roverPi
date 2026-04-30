@@ -249,57 +249,63 @@ class FaceDisplay:
 
     def _draw_radar(self, surf, pg, scan: dict, t: float) -> None:
         # radar panel is (W-HH) × H = 240 × 320
-        panel_w = self.W - self.HH
-        cx, cy = panel_w // 2, self.H // 2
-        max_r = 105    # px  — represents MAX_DIST_MM
-        MAX_DIST = 3500.0
+        panel_w = self.W - self.HH   # 240
+        panel_h = self.H              # 320
+        cx, cy = panel_w // 2, panel_h // 2   # 120, 160
+        max_r = min(cx, cy) - 10     # 110 px — fills panel, 10 px margin
+        MAX_DIST = 10000.0            # mm at max_r; 10 m range (matches legacy RMAX)
 
-        # grid rings  (1 m, 2 m, 3 m)
-        for ring_mm, label in [(1000, "1m"), (2000, "2m"), (3000, "3m")]:
+        # grid rings with distance labels
+        try:
+            font_sm = pg.font.SysFont("monospace", 9)
+        except Exception:
+            font_sm = None
+        for ring_mm, ring_lbl in [(2000, "2m"), (4000, "4m"), (6000, "6m"), (8000, "8m")]:
             r_px = int(ring_mm / MAX_DIST * max_r)
             pg.draw.circle(surf, GRID, (cx, cy), r_px, 1)
+            if font_sm:
+                ls = font_sm.render(ring_lbl, True, DIM)
+                surf.blit(ls, (cx + 2, cy - r_px - 10))
 
-        # cross-hairs
-        pg.draw.line(surf, GRID, (cx, cy - max_r), (cx, cy + max_r), 1)
-        pg.draw.line(surf, GRID, (cx - max_r, cy), (cx + max_r, cy), 1)
+        # outer boundary + cross-hairs
+        pg.draw.circle(surf, DIM, (cx, cy), max_r, 1)
+        pg.draw.line(surf, GRID, (cx, cy - max_r - 4), (cx, cy + max_r + 4), 1)
+        pg.draw.line(surf, GRID, (cx - max_r - 4, cy), (cx + max_r + 4, cy), 1)
 
         # scan points
         if scan:
             for angle_deg, dist_mm in scan.items():
                 if dist_mm <= 0:
                     continue
-                r_px = min(int(dist_mm / MAX_DIST * max_r), max_r)
-                # 0° = forward = up on screen  → subtract 90°
+                r_px = int(min(dist_mm, MAX_DIST) / MAX_DIST * max_r)
+                # 0° = forward = up on screen
                 rad = math.radians(angle_deg - 90)
                 px = cx + int(r_px * math.cos(rad))
                 py = cy + int(r_px * math.sin(rad))
 
                 if dist_mm < 500:
-                    col = _NEAR_COL
-                    dot_r = 3
+                    col, dot_r = _NEAR_COL, 3
                 elif dist_mm < 1500:
-                    col = _MID_COL
-                    dot_r = 2
+                    col, dot_r = _MID_COL, 2
                 else:
-                    col = _FAR_COL
-                    dot_r = 1
+                    col, dot_r = _FAR_COL, 2
 
                 pg.draw.circle(surf, col, (px, py), dot_r)
 
-        # robot body — small arrow pointing forward (up)
+        # robot body — arrow pointing forward (up)
         body_pts = [
-            (cx,      cy - 10),   # nose
+            (cx,      cy - 10),
             (cx - 7,  cy + 8),
             (cx,      cy + 4),
             (cx + 7,  cy + 8),
         ]
         pg.draw.polygon(surf, CYAN, body_pts)
 
-        # "RADAR" label top-right
+        # "RADAR" label — panel-local coords
         try:
             font = pg.font.SysFont("monospace", 11)
             label_surf = font.render("RADAR", True, DIM)
-            surf.blit(label_surf, (self.W - 52, 4))
+            surf.blit(label_surf, (4, 4))
         except Exception:
             pass
 

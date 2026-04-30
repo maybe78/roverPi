@@ -119,6 +119,7 @@ def create_all() -> RoverComponents:
         tool_registry=registry,
         tts=c.tts,
         display=c.display,
+        telegram=c.telegram,
     )
 
     return c

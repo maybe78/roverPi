@@ -52,6 +52,17 @@ def main():
     c.stt.start()
     c.agent.start()
 
+    # ------------------------------------------------------------------
+    # Telegram: receive text commands, reply with TTS + text
+    # ------------------------------------------------------------------
+    if c.telegram:
+        def on_telegram_message(text: str):
+            logger.info(f"Telegram input: {text}")
+            c.display.set_state("listening")
+            c.agent.submit(text)
+
+        c.telegram.start_polling(on_telegram_message)
+
     # Greet on startup (ollama already ready from start_all.sh)
     threading.Timer(
         1.0,
@@ -167,6 +178,8 @@ def main():
         shutdown_event.set()
         c.agent.stop()
         c.stt.stop()
+        if c.telegram:
+            c.telegram.stop_polling()
         c.bt_speaker.stop()
         c.lidar.stop()
         c.display.stop()
