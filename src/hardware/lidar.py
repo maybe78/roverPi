@@ -50,7 +50,7 @@ class Lidar:
             attempt += 1
             laser = None
 
-            # --- initialise ---
+            # --- initialise (exact legacy/lidar.py settings) ---
             try:
                 laser = ydlidar.CYdLidar()
                 laser.setlidaropt(ydlidar.LidarPropSerialPort, self._port)
@@ -58,18 +58,32 @@ class Lidar:
                 laser.setlidaropt(ydlidar.LidarPropLidarType, ydlidar.TYPE_TRIANGLE)
                 laser.setlidaropt(ydlidar.LidarPropDeviceType, ydlidar.YDLIDAR_TYPE_SERIAL)
                 laser.setlidaropt(ydlidar.LidarPropScanFrequency, 6.0)
-                laser.setlidaropt(ydlidar.LidarPropSampleRate, 3)
+                laser.setlidaropt(ydlidar.LidarPropSampleRate, 9)
                 laser.setlidaropt(ydlidar.LidarPropSingleChannel, True)
-                laser.setlidaropt(ydlidar.LidarPropIntensity, False)
 
                 if not laser.initialize():
                     logger.warning(f"Lidar initialize() failed (attempt {attempt}), retry in 5s")
+                    try:
+                        laser.disconnecting()
+                    except Exception:
+                        pass
                     time.sleep(5)
                     continue
 
-                if not laser.turnOn():
-                    logger.warning(f"Lidar turnOn() failed (attempt {attempt}), retry in 5s")
+                # Retry turnOn() on the same object — do NOT recreate between retries
+                turned_on = False
+                for ton in range(1, 4):
+                    if laser.turnOn():
+                        turned_on = True
+                        break
+                    logger.warning(f"Lidar turnOn {ton}/3 failed, retry in 3s")
+                    laser.turnOff()
+                    time.sleep(3)
+
+                if not turned_on:
+                    logger.warning(f"Lidar init attempt {attempt} failed, full reset in 5s")
                     try:
+                        laser.turnOff()
                         laser.disconnecting()
                     except Exception:
                         pass
