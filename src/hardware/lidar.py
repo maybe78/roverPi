@@ -34,20 +34,25 @@ class Lidar:
     def _connect(self) -> None:
         try:
             import ydlidar, time
-            ydlidar.os_init()
-            time.sleep(0.5)  # let USB device settle after hotplug
+            # os_init() omitted intentionally — matches legacy/lidar.py which worked
             self._laser = ydlidar.CYdLidar()
             self._laser.setlidaropt(ydlidar.LidarPropSerialPort, self._port)
             self._laser.setlidaropt(ydlidar.LidarPropSerialBaudrate, self._baudrate)
             self._laser.setlidaropt(ydlidar.LidarPropLidarType, ydlidar.TYPE_TRIANGLE)
             self._laser.setlidaropt(ydlidar.LidarPropDeviceType, ydlidar.YDLIDAR_TYPE_SERIAL)
             self._laser.setlidaropt(ydlidar.LidarPropScanFrequency, 6.0)
-            self._laser.setlidaropt(ydlidar.LidarPropSampleRate, 9)
+            self._laser.setlidaropt(ydlidar.LidarPropSampleRate, 5)
             self._laser.setlidaropt(ydlidar.LidarPropSingleChannel, True)
             if not self._laser.initialize():
                 raise RuntimeError("Lidar initialize() failed")
-            if not self._laser.turnOn():
-                raise RuntimeError("Lidar turnOn() failed")
+            # Motor needs time to spin up — retry turnOn() with backoff
+            for attempt in range(1, 4):
+                if self._laser.turnOn():
+                    break
+                logger.warning(f"Lidar turnOn attempt {attempt}/3 failed, waiting 3s...")
+                time.sleep(3.0)
+            else:
+                raise RuntimeError("Lidar turnOn() failed after 3 attempts")
             logger.info(f"YDLIDAR ready on {self._port}")
             self._start_scan_thread()
         except ImportError:
