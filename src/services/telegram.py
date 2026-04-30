@@ -1,4 +1,3 @@
-import cv2
 import requests
 import os
 import logging
@@ -176,7 +175,7 @@ class TelegramBot:
         Returns:
             str: Путь к сохранённому файлу или None при ошибке
         """
-        # Создание объекта для захвата видео с камеры
+        import cv2
         cap = cv2.VideoCapture(camera_index)
         
         if not cap.isOpened():
@@ -198,22 +197,24 @@ class TelegramBot:
             
             # Сохранение изображения
             success = cv2.imwrite(save_path, frame)
-            
+
             if success:
                 self.logger.info(f"Фото сохранено: {save_path}")
                 return save_path
             else:
                 self.logger.error("Ошибка при сохранении изображения")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"Ошибка при захвате фото: {e}")
             return None
-            
+
         finally:
-            # Освобождение ресурсов камеры
             cap.release()
-            cv2.destroyAllWindows()
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
     
     def capture_and_send_photo(self, caption: Optional[str] = None, 
                               camera_index: int = 0, chat_id: Optional[str] = None,
